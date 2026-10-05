@@ -291,11 +291,15 @@ jobs:
           trap 'st=$?; echo "FAILED CMD=[$BASH_COMMAND] exit=$st" >> diag.log' ERR
 
           echo "--- feeds 前置检查 ---"
-          ls -l scripts/feeds || echo "scripts/feeds 不存在"
-          head -1 scripts/feeds 2>/dev/null
+          if [ -f scripts/feeds ]; then
+            ls -l scripts/feeds
+            head -1 scripts/feeds
+          else
+            echo "::error::scripts/feeds 不存在 —— checkout 没把文件拉下来"
+          fi
           perl -v 2>&1 | head -1 || echo "perl 不存在"
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a || ./scripts/feeds install -a
+          ./scripts/feeds update -a || perl ./scripts/feeds update -a
+          ./scripts/feeds install -a || perl ./scripts/feeds install -a || ./scripts/feeds install -a
           make defconfig
           ls feeds/ 2>/dev/null | head -10
 

@@ -39,6 +39,8 @@ jobs:
       - name: '0 自检'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           echo "GITHUB_WORKFLOW = ${GITHUB_WORKFLOW}"
           echo "GITHUB_REPOSITORY = ${GITHUB_REPOSITORY}"
           echo "GITHUB_REF = ${GITHUB_REF}"
@@ -55,6 +57,8 @@ jobs:
       - name: '2 安装编译依赖'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex bison g++ g++-multilib gperf make \
@@ -80,6 +84,8 @@ jobs:
       - name: '3 内嵌生成 config.minimal（精简 + 满血 NSS + ath11k）'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           python3 - <<'PYEOF'
           cfg = r'''
           # ============================================================
@@ -212,6 +218,8 @@ jobs:
       - name: '3.5 内嵌生成 diy.sh（默认主机名/时区/自愈脚本，默认全注释=不覆盖）'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           python3 - <<'PYEOF'
           src = r'''
           #!/usr/bin/env bash
@@ -276,6 +284,8 @@ jobs:
       - name: '4 拉取 feeds'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           ./scripts/feeds update -a
           ./scripts/feeds install -a || ./scripts/feeds install -a
           make defconfig
@@ -284,6 +294,8 @@ jobs:
       - name: '5 生成 .config（自动探测设备符号 + 剔除本分支不存在的包）'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           cp config.minimal .config
 
           python3 - <<'PYEOF'
@@ -339,6 +351,8 @@ jobs:
       - name: '6 个性化（diy.sh）'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           bash diy.sh || echo "[warn] diy.sh 退出码 $?（编译环境没有 uci 属正常，不影响出固件）"
 
           pts/feeds install -a
@@ -347,6 +361,8 @@ jobs:
       - name: '7 预下载 dl'
         run: |
           set -x
+          trap 'st=$?; echo "::error::FAILED CMD=[$BASH_COMMAND] exit=$st" >&2' ERR
+
           make download -j${{ github.event.inputs.nthreads || '4' }} || true
 
       - name: '8 开始编译'

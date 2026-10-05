@@ -21,9 +21,6 @@ on:
       config_file:
         required: true
         type: string
-      firmware_tag:
-        required: true
-        type: string
       artifact_prefix:
         required: true
         type: string
@@ -120,10 +117,6 @@ on:
         description: 'config 文件路径'
         required: true
         default: 'configs/IPQ60XX.config'
-      firmware_tag:
-        description: 'Release tag'
-        required: true
-        default: 'IPQ60XX'
       artifact_prefix:
         description: '产物前缀'
         required: true
@@ -242,6 +235,7 @@ jobs:
       artifact_name: ${{ steps.vars.outputs.artifact_name }}
       version_kernel: ${{ steps.source.outputs.version_kernel }}
       version_info: ${{ steps.source.outputs.version_info }}
+      firmware_tag: ${{ steps.tag.outputs.firmware_tag }}
       ccache_key: ${{ steps.vars.outputs.ccache_key }}
       staging_key: ${{ steps.vars.outputs.staging_key }}
     permissions:
@@ -341,6 +335,32 @@ jobs:
           {
             echo "ARTIFACT_NAME=$ARTIFACT_NAME"
           } >> "$GITHUB_ENV"
+
+      # ---------- 4.5 生成 Release 标签 ----------
+      # 规则：<主机名>_<内核版本>_<config 名称>_<构建日期>
+      #   例：JDC-AX1800Pro_6.12.108_IPQ60XX-minimal_2026-10-06
+      # 为什么不放成输入项：内核版本只有 clone 完源码才知道，表单上填不出来；
+      #   而主机名 / 档位 / 日期也都是确定的，硬编码一个 tag 反而会和实际产物对不上。
+      - name: Generate Release Tag(生成 Release 标签)
+        id: tag
+        env:
+          HOSTNAME: ${{ inputs.hostname }}
+          CONFIG_FILE: ${{ inputs.config_file }}
+          KERNEL_VERSION: ${{ steps.source.outputs.version_kernel }}
+        run: |
+          # Git tag 不接受空格 / ~ ^ : ? * [ \ 等字符，统一替换成下划线
+          safe() { printf '%s' "$1" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/_+/_/g; s/^_+//; s/_+$//'; }
+
+          CONFIG_NAME="$(basename "$CONFIG_FILE" .config)"
+          BUILD_DATE="$(date '+%Y-%m-%d')"
+          KERNEL="${KERNEL_VERSION:-unknown}"
+
+          FIRMWARE_TAG="$(safe "$HOSTNAME")_$(safe "$KERNEL")_$(safe "$CONFIG_NAME")_$BUILD_DATE"
+          {
+            echo "firmware_tag=$FIRMWARE_TAG"
+            echo "build_date=$BUILD_DATE"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Release tag = $FIRMWARE_TAG"
 
       - name: Cache Ccache(缓存 ccache)
         uses: actions/cache@v4
@@ -604,35 +624,122 @@ jobs:
           name: ${{ needs.Build.outputs.artifact_name }}
           path: artifacts/firmware
 
+      # Release 说明改由 bash 拼装：账号/密码、无线密码这些要根据
+      # 「密码是否为空」「无线是否开启」做分支，用 YAML 内联表达式写会很难读。
+      - name: Build Release Notes(生成 Release 说明)
+        id: notes
+        env:
+          RELEASE_SUMMARY: ${{ inputs.release_summary }}
+          REPO_URL: ${{ inputs.repo_url }}
+          REPO_BRANCH: ${{ inputs.repo_branch }}
+          LAN_IP: ${{ inputs.lan_ip }}
+          LAN_NETMASK: ${{ inputs.lan_netmask }}
+          LAN_DNS: ${{ inputs.lan_dns }}
+          HOSTNAME: ${{ inputs.hostname }}
+          TIMEZONE: ${{ inputs.timezone }}
+          ROOT_PASSWORD: ${{ inputs.root_password }}
+          WIFI_ENABLED: ${{ inputs.wifi_enabled }}
+          WIFI_SSID: ${{ inputs.wifi_ssid }}
+          WIFI_PASSWORD: ${{ inputs.wifi_password }}
+          WIFI_CHANNEL_2G: ${{ inputs.wifi_channel_2g }}
+          WIFI_HTMODE_2G: ${{ inputs.wifi_htmode_2g }}
+          WIFI_CHANNEL_5G: ${{ inputs.wifi_channel_5g }}
+          WIFI_HTMODE_5G: ${{ inputs.wifi_htmode_5g }}
+          FIRMWARE_TAG: ${{ needs.Build.outputs.firmware_tag }}
+          KERNEL_VERSION: ${{ needs.Build.outputs.version_kernel }}
+          VERSION_INFO: ${{ needs.Build.outputs.version_info }}
+        run: |
+          # 「密码是否为空」「无线是否开启」这两个分支直接在写入前判断，
+          # 生成完再回头 sed 替换既难读又容易漏，所以按段落增量追加。
+          NOTES=release-notes.md
+          : > "$NOTES"
+
+          # ---------- 登录凭据 ----------
+          cat >> "$NOTES" <<MD
+          ### 🔐 登录凭据
+
+          | 项目 | 值 |
+          | :--- | :--- |
+          | 登录账号 | **\`root\`** |
+          MD
+          if [ -n "$ROOT_PASSWORD" ]; then
+            echo "| 登录密码 | **\`${ROOT_PASSWORD}\`** |" >> "$NOTES"
+          else
+            echo "| 登录密码 | **未设置**（开机无密码，登录后请立即设置） |" >> "$NOTES"
+          fi
+          cat >> "$NOTES" <<MD
+
+          > ⚠️ 以上为出厂默认凭据，且本仓库是公开仓库 —— **刷机完成后请第一时间登录修改密码**。
+
+          MD
+
+          # ---------- 无线 ----------
+          cat >> "$NOTES" <<MD
+          ### 📶 无线
+
+          | 项目 | 值 |
+          | :--- | :--- |
+          MD
+          if [ "$WIFI_ENABLED" = "on" ]; then
+            cat >> "$NOTES" <<MD
+          | 无线状态 | **默认开启** |
+          | 2.4G SSID | **\`${WIFI_SSID}\`** |
+          | 5G SSID | **\`${WIFI_SSID}_5G\`** |
+          | 无线密码 | **\`${WIFI_PASSWORD}\`** |
+          | 2.4G 信道 | ch${WIFI_CHANNEL_2G} / ${WIFI_HTMODE_2G} |
+          | 5G 信道 | ch${WIFI_CHANNEL_5G} / ${WIFI_HTMODE_5G} |
+          MD
+          else
+            cat >> "$NOTES" <<MD
+          | 无线状态 | **默认关闭（不广播）** |
+          | 如何启用 | LuCI → 网络 → 无线 → 启用，再自行设定 SSID 与密码 |
+          MD
+          fi
+          echo >> "$NOTES"
+
+          # ---------- 其余固定段落 ----------
+          cat >> "$NOTES" <<MD
+          ### 🌐 网络初始状态
+
+          - 管理地址：**${LAN_IP}**（掩码 ${LAN_NETMASK}，DNS ${LAN_DNS}）
+          - 主机名：${HOSTNAME}　时区：${TIMEZONE}
+
+          ### 🧊 版本
+
+          - Release 标签：\`${FIRMWARE_TAG}\`
+          - 内核：**${KERNEL_VERSION}**
+          - 源码最后一次提交：${VERSION_INFO}
+
+          ### 📒 固件信息
+
+          - ${RELEASE_SUMMARY}
+          - 固件源码：${REPO_URL}
+          - 源码分支：${REPO_BRANCH}
+          - 设备：京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01 / IPQ6000）
+
+          ### 💾 刷机对照
+
+          - \`*-squashfs-sysupgrade.bin\` → 网页「系统→备份/升级」直接刷（已有 OpenWrt 时首选）
+          - \`*-squashfs-factory.bin\` → U-Boot 首刷 / 跨固件平台刷
+          - \`*-squashfs-recovery.bin\` → 救砖
+          - 刷前确认 \`mmcblk0p18\` 为 2G 大分区布局
+          MD
+
+          echo "body_file=$PWD/$NOTES" >> "$GITHUB_OUTPUT"
+          echo "----- Release 说明预览 -----"
+          cat release-notes.md
+
       - name: Upload Firmware To Release(发布 Release)
         uses: ncipollo/release-action@v1
         with:
-          name: ${{ inputs.firmware_tag }}
-          tag: ${{ inputs.firmware_tag }}
+          name: ${{ needs.Build.outputs.firmware_tag }}
+          tag: ${{ needs.Build.outputs.firmware_tag }}
           allowUpdates: true
           replacesArtifacts: true
           artifactErrorsFailBuild: false
           token: ${{ github.token }}
           artifacts: artifacts/firmware/*
-          body: |
-            ### 📒 固件信息
-            - ${{ inputs.release_summary }}
-            - 固件源码：${{ inputs.repo_url }}
-            - 源码分支：${{ inputs.repo_branch }}
-            - 设备：京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01 / IPQ6000）
-            ### 🌐 网络初始状态
-            - 管理地址：**${{ inputs.lan_ip }}**（掩码 ${{ inputs.lan_netmask }}，DNS ${{ inputs.lan_dns }}）
-            - 主机名：${{ inputs.hostname }}　时区：${{ inputs.timezone }}
-            - 无线：**${{ inputs.wifi_enabled }}**　SSID：${{ inputs.wifi_ssid }} / ${{ inputs.wifi_ssid }}_5G
-            - 无线信道：2.4G ch${{ inputs.wifi_channel_2g }} ${{ inputs.wifi_htmode_2g }} ｜ 5G ch${{ inputs.wifi_channel_5g }} ${{ inputs.wifi_htmode_5g }}
-            ### 🧊 版本
-            - 内核：**${{ needs.Build.outputs.version_kernel }}**
-            - 源码最后一次提交：${{ needs.Build.outputs.version_info }}
-            ### 💾 刷机对照
-            - `*-squashfs-sysupgrade.bin` → 网页「系统→备份/升级」直接刷（已有 OpenWrt 时首选）
-            - `*-squashfs-factory.bin` → U-Boot 首刷 / 跨固件平台刷
-            - `*-squashfs-recovery.bin` → 救砖
-            - 刷前确认 `mmcblk0p18` 为 2G 大分区布局
+          bodyFile: ${{ steps.notes.outputs.body_file }}
 
   Cleanup:
     runs-on: ubuntu-24.04

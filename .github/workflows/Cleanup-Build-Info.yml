@@ -14,9 +14,9 @@
 #    但 Actions 自己的 GITHUB_TOKEN 在本 workflow 里被授予了
 #    contents:write + actions:write，删这些是够用的。
 #
-#  触发方式：
-#    1) Actions → Cleanup Build Info → Run workflow（推荐，手动点）
-#    2) push 本文件（首次上线时用来自动跑一次；跑完记得把 push 触发器摘掉）
+#  触发方式：Actions → Cleanup Build Info → Run workflow（只保留手动触发）
+#    —— 首次上线时曾短暂挂过 push 触发器用来自动跑一次，跑通后就摘掉了。
+#       不摘的话，以后任何人改这个文件都会顺手把 Release 全清一遍，太危险。
 #
 #  安全设计：
 #    - 全程 `|| true`，单个对象删不掉不影响其余清理
@@ -27,11 +27,6 @@ name: Cleanup Build Info
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 25.12-nss
-    paths:
-      - '.github/workflows/Cleanup-Build-Info.yml'
 
 permissions:
   contents: write

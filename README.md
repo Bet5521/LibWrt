@@ -11,6 +11,7 @@
 ```
 .github/workflows/Build-OpenWrt.yml      # workflow_call 公共模板（Build / Release / Cleanup 三 job）
 .github/workflows/IPQ60XX-JDCloud.yml    # 亚瑟入口（手动表单 + push + 每周一 cron）
+.github/workflows/Cleanup-Build-Info.yml # 一键清空 Release/Tag/运行记录/产物/缓存（手动触发）
 configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，64 包）
 configs/IPQ60XX-minimal.config           # 极简档位（46 包，默认档）
 configs/IPQ60XX-full.config              # 全功能档位（109 包）
@@ -26,7 +27,44 @@ ci/README.md                             # 自定义项完整对照表
 1. Actions → 左栏选 **`IPQ60XX-JDCloud-AX1800Pro`** → **Run workflow**
 2. 表单里按需改 LAN 地址 / 无线初始状态 / 组件，**留空即用默认值**
 3. 约 40~70 分钟出结果（有缓存时 10~20 分钟）
-4. 产物：该 run 的 **Artifacts**，或 **Releases → IPQ60XX-JDCloud**
+4. 产物：该 run 的 **Artifacts**，或 **Releases** 里以日期结尾的那个标签（见下节）
+
+### Release 标签规则
+
+标签**自动生成**，规则是 `<主机名>_<内核版本>_<config 名称>_<构建日期>`：
+
+```
+JDC-AX1800Pro_6.12.108_IPQ60XX-minimal_2026-10-06
+│             │        │                  │
+│             │        │                  构建日期（Asia/Shanghai）
+│             │        config 文件基名（去掉 .config）
+│             内核版本（clone 源码后才知道，所以不能做成表单项）
+主机名
+```
+
+四档分别会得到 `..._IPQ60XX-minimal_...` / `..._IPQ60XX_...` / `..._IPQ60XX-full_...` / `..._NoWiFi_...`。
+日期取北京时间；同一天重复构建会**更新同一个 Release**（`allowUpdates: true`），不会堆出一串同名标签。
+
+### Release 里会写明默认凭据
+
+Release 说明顶部有「🔐 登录凭据」和「📶 无线」两张表，直接给出：
+
+| 场景 | Release 上显示 |
+| --- | --- |
+| 表单填了 `root_password` | 账号 `root` + 你填的密码 |
+| `root_password` 留空 | 账号 `root` + 「未设置（开机无密码，登录后请立即设置）」 |
+| `wifi_enabled = on` | 无线状态、2.4G/5G SSID、无线密码、信道频宽 |
+| `wifi_enabled = off` | 「默认关闭（不广播）」+ 如何在 LuCI 里启用 |
+
+> ⚠️ 本仓库是**公开仓库**，这些凭据写在 Release 上等于公开。
+> 要么把 `root_password` / `wifi_password` 当成一次性出厂值、**刷完立刻改**；
+> 要么干脆留空，让它开机无密码、首次登录再设。
+
+### 一键清空构建信息
+
+Actions → **Cleanup Build Info** → Run workflow，会删掉
+Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓存 / `diag-branch`。
+（外部 PAT 常是只读的删不动这些，所以这个 workflow 用的是 Actions 自己的 `GITHUB_TOKEN`。）
 
 ### 可自定义项（18 项表单）
 
@@ -268,7 +306,8 @@ python3 configs/_gen_profiles.py
 
 要排除某个包**必须写 `=n`**，只加 `#` 注释是无效的。
 
-加新机型：复制一份 `IPQ60XX-JDCloud.yml`，改 `config_file` / `firmware_tag` / `artifact_prefix` 即可，模板不用动。
+加新机型：复制一份 `IPQ60XX-JDCloud.yml`，改 `config_file` / `artifact_prefix` / `hostname` 即可，模板不用动
+（`firmware_tag` 已改为自动生成，不需要也不应该再手填）。
 
 ## 关键设计（照抄官方，别改）
 

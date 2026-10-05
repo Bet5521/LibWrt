@@ -143,7 +143,9 @@ jobs:
       repo_url: https://github.com/Bet5521/LibWrt.git
       repo_branch: 25.12-nss
       config_file: ${{ inputs.config_file || 'configs/IPQ60XX-minimal.config' }}
-      firmware_tag: IPQ60XX-JDCloud
+      # firmware_tag 不再由这里指定：模板会用
+      #   <主机名>_<内核版本>_<config 名称>_<构建日期>
+      # 自动拼出（内核版本只有 clone 完源码才知道，表单里填不出来）。
       artifact_prefix: IPQ60XX
       make_release: ${{ github.event_name != 'workflow_dispatch' || inputs.make_release }}
 

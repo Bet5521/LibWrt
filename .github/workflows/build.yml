@@ -64,6 +64,9 @@ jobs:
           sudo apt-get install -y \
             build-essential clang flex bison g++ g++-multilib gperf make \
             perl perl-base patch xz-utils rsync cpio file kmod mtd-utils \
+            zstd lz4 lzop liblz4-dev liblz4-1 libzstd-dev liblzma-dev \
+            liblzo2-dev uuid-dev libudev-dev libsqlite3-dev libreadline-dev \
+            libelf-dev libnl-genl-3-dev sharutils which zip m4 texinfo \
             gawk gettext git libncurses-dev libssl-dev libtool libtool-bin \
             autoconf automake libtool pkg-config protobuf-compiler \
             python3-dev python3-pip unzip zlib1g-dev ccache \
@@ -375,7 +378,7 @@ jobs:
           set -x
           trap 'st=$?; echo "FAILED CMD=[$BASH_COMMAND] exit=$st" >> diag.log' ERR
 
-          make download -j${{ github.event.inputs.nthreads || '4' }} || true
+          make download -j${{ github.event.inputs.nthreads || '4' }}
 
       - name: '8 开始编译'
         run: |

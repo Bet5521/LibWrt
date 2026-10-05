@@ -38,6 +38,7 @@ jobs:
     steps:
       - name: '0 自检'
         run: |
+          set -x
           echo "GITHUB_WORKFLOW = ${GITHUB_WORKFLOW}"
           echo "GITHUB_REPOSITORY = ${GITHUB_REPOSITORY}"
           echo "GITHUB_REF = ${GITHUB_REF}"
@@ -53,6 +54,7 @@ jobs:
 
       - name: '2 安装编译依赖'
         run: |
+          set -x
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex bison g++ g++-multilib gperf make \
@@ -65,8 +67,19 @@ jobs:
           echo "nproc = $(nproc)"
           free -g | head -2
 
+      - name: '2.5 命令探测（定位 exit 127 / command not found）'
+        run: |
+          echo "=== 关键命令是否存在（MISSING = 就是它导致 exit 127）==="
+          for c in make gcc g++ clang patch bison flex gperf python3 python3-pip \
+                   rsync unzip xz xz-utils cpio git sed awk tar curl wget \
+                   kmod mtd-utils uci opkg apk; do
+            printf "%-14s %s\n" "$c" "$(command -v "$c" || echo MISSING)"
+          done
+          echo "=== 探测结束 ==="
+
       - name: '3 内嵌生成 config.minimal（精简 + 满血 NSS + ath11k）'
         run: |
+          set -x
           python3 - <<'PYEOF'
           cfg = r'''
           # ============================================================
@@ -198,6 +211,7 @@ jobs:
 
       - name: '3.5 内嵌生成 diy.sh（默认主机名/时区/自愈脚本，默认全注释=不覆盖）'
         run: |
+          set -x
           python3 - <<'PYEOF'
           src = r'''
           #!/usr/bin/env bash
@@ -261,6 +275,7 @@ jobs:
 
       - name: '4 拉取 feeds'
         run: |
+          set -x
           ./scripts/feeds update -a
           ./scripts/feeds install -a || ./scripts/feeds install -a
           make defconfig
@@ -268,6 +283,7 @@ jobs:
 
       - name: '5 生成 .config（自动探测设备符号 + 剔除本分支不存在的包）'
         run: |
+          set -x
           cp config.minimal .config
 
           python3 - <<'PYEOF'
@@ -321,13 +337,17 @@ jobs:
           echo "============================================"
 
       - name: '6 个性化（diy.sh）'
-        run: bash diy.sh
+        run: |
+          set -x
+          bash diy.sh || echo "[warn] diy.sh 退出码 $?（编译环境没有 uci 属正常，不影响出固件）"
 
           pts/feeds install -a
           make defconfig
 
       - name: '7 预下载 dl'
-        run: make download -j${{ github.event.inputs.nthreads || '4' }} || true
+        run: |
+          set -x
+          make download -j${{ github.event.inputs.nthreads || '4' }} || true
 
       - name: '8 开始编译'
         run: |

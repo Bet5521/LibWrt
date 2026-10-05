@@ -167,12 +167,22 @@ echo "[diy.sh] 已写入 files/etc/uci-defaults/99-diy-custom"
 
 # ============================================================
 #  3) 自愈 cron（用配置好的 LAN IP 做探测）
+#     logrotate 那一行只在固件真的编了该包时才写，
+#     否则「极简档」里没有 logrotate，cron 会每早空跑一次。
 # ============================================================
+if [ -f .config ] && grep -q '^CONFIG_PACKAGE_logrotate=y' .config; then
+  CRON_LOGROTATE='# 每天 04:30 强制轮转日志，防止写满 flash
+30 4 * * * logrotate -f /etc/logrotate.conf >/dev/null 2>&1'
+  echo "[diy.sh] 已编入 logrotate，写入日志轮转 cron"
+else
+  CRON_LOGROTATE=''
+  echo "[diy.sh] 未编入 logrotate，跳过日志轮转 cron"
+fi
+
 cat > files/etc/crontabs/root <<EOF
 # 每 5 分钟检查网关连通性，不通就重启无线（无线掉线自愈）
 */5 * * * * ping -c1 -w2 ${LAN_IP} >/dev/null 2>&1 || (wifi down; sleep 3; wifi up)
-# 每天 04:30 强制轮转日志，防止写满 flash
-30 4 * * * logrotate -f /etc/logrotate.conf >/dev/null 2>&1
+${CRON_LOGROTATE}
 EOF
 chmod 600 files/etc/crontabs/root
 echo "[diy.sh] 已写入 files/etc/crontabs/root（探测目标 ${LAN_IP}）"

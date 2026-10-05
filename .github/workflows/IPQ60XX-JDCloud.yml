@@ -20,17 +20,17 @@ on:
         description: '固件档位（配置文件）'
         type: choice
         options:
-          - configs/IPQ60XX.config
           - configs/IPQ60XX-minimal.config
+          - configs/IPQ60XX.config
           - configs/IPQ60XX-full.config
           - configs/NoWiFi.config
-        default: configs/IPQ60XX.config
+        default: configs/IPQ60XX-minimal.config
 
       # ==================== LAN / 系统 ====================
       lan_ip:
         description: 'LAN IP（路由器管理地址，如 192.168.10.1）'
         required: false
-        default: '192.168.1.1'
+        default: '192.168.10.1'
       lan_netmask:
         description: 'LAN 子网掩码'
         required: false
@@ -142,14 +142,14 @@ jobs:
       # ---------- 基础 ----------
       repo_url: https://github.com/Bet5521/LibWrt.git
       repo_branch: 25.12-nss
-      config_file: ${{ inputs.config_file || 'configs/IPQ60XX.config' }}
+      config_file: ${{ inputs.config_file || 'configs/IPQ60XX-minimal.config' }}
       firmware_tag: IPQ60XX-JDCloud
       artifact_prefix: IPQ60XX
       manifest_file: libwrt-qualcommax-ipq60xx.manifest
       make_release: ${{ github.event_name != 'workflow_dispatch' || inputs.make_release }}
 
       # ---------- LAN / 系统 ----------
-      lan_ip: ${{ inputs.lan_ip || '192.168.1.1' }}
+      lan_ip: ${{ inputs.lan_ip || '192.168.10.1' }}
       lan_netmask: ${{ inputs.lan_netmask || '255.255.255.0' }}
       lan_dns: ${{ inputs.lan_dns || '223.5.5.5' }}
       hostname: ${{ inputs.hostname || 'JDC-AX1800Pro' }}

@@ -11,16 +11,23 @@
 
 | 选项 | 包数 | 说明 |
 | :--- | :--: | :--- |
-| `configs/IPQ60XX.config` | 71 | **标准**：精简满血 NSS + 无线 + SQM/UPnP/WoL + 基础 LuCI（默认） |
-| `configs/IPQ60XX-minimal.config` | 51 | **极简**：去掉 SQM/UPnP/WoL/ttyd/htop/watchdog 等便利组件，最省 flash |
+| `configs/IPQ60XX-minimal.config` | 49 | **极简**（默认）：去掉 SQM/UPnP/WoL/ttyd/htop/watchdog/logrotate 等便利组件，最省 flash |
+| `configs/IPQ60XX.config` | 71 | **标准**：精简满血 NSS + 无线 + SQM/UPnP/WoL + 基础 LuCI |
 | `configs/IPQ60XX-full.config` | 120 | **全功能**：额外加常用 LuCI 应用 + 命令行工具 + USB 存储支持 |
-| `configs/NoWiFi.config` | 42 | **无无线**：不编 ath11k 与 wpad（当纯有线路由用） |
+| `configs/NoWiFi.config` | 65 | **无无线**：不编 ath11k 与 wpad（当纯有线路由用） |
+
+> 四个档位的逐包差异见 [`../configs/README.md`](../configs/README.md)。
+> 三个派生档位由 `configs/_gen_profiles.py` 从基准档 `IPQ60XX.config` 自动生成，不会各自漂移。
+>
+> ⚠️ **极简档去掉了 `luci-app-package-manager`**（LuCI 里的「软件包」页面），
+> 之后装东西要走 SSH `apk add`；想保留就用 `extra_packages` 填 `luci-app-package-manager`。
+> 极简档也没有 `logrotate`，`ci/diy.sh` 会自动跳过日志轮转的 cron 行。
 
 ### 2. LAN / 系统
 
 | 表单项 | 默认值 | 说明 |
 | :--- | :--- | :--- |
-| `lan_ip` | `192.168.1.1` | 路由器管理地址。想避开光猫的 192.168.1.1 就改成 `192.168.10.1` |
+| `lan_ip` | `192.168.10.1` | 路由器管理地址（避开光猫常用的 192.168.1.1） |
 | `lan_netmask` | `255.255.255.0` | 子网掩码 |
 | `lan_dns` | `223.5.5.5` | 通过 DHCP 下发给客户端的 DNS |
 | `hostname` | `JDC-AX1800Pro` | 主机名 |

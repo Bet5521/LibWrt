@@ -1,0 +1,128 @@
+# =============================================================
+#  一键清理本仓库的所有构建信息
+#
+#  清理范围：Release（含全部固件资产）/ Tag / Actions 运行记录 /
+#            产物 Artifacts / Actions 缓存 / diag-branch 诊断分支
+#
+#  用途：
+#    - 本仓库是公开仓库，历史 Release 里带着固件与默认密码，
+#      想彻底清干净时用一次。
+#    - 换 tag 命名规则前先把旧的 Release/Tag 清掉，避免新旧混在一起。
+#
+#  原理：
+#    外部 PAT 往往只有只读权限（删不动 Release / 运行记录），
+#    但 Actions 自己的 GITHUB_TOKEN 在本 workflow 里被授予了
+#    contents:write + actions:write，删这些是够用的。
+#
+#  触发方式：
+#    1) Actions → Cleanup Build Info → Run workflow（推荐，手动点）
+#    2) push 本文件（首次上线时用来自动跑一次；跑完记得把 push 触发器摘掉）
+#
+#  安全设计：
+#    - 全程 `|| true`，单个对象删不掉不影响其余清理
+#    - 循环删除运行记录时【跳过本次运行】，否则会把自己删掉导致中断
+#    - 最后一步才删自己：这样如果前面某步失败，运行记录会保留下来供排查
+# =============================================================
+name: Cleanup Build Info
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 25.12-nss
+    paths:
+      - '.github/workflows/Cleanup-Build-Info.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  Cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SELF_RUN: ${{ github.run_id }}
+    steps:
+      - name: Inventory Before(清理前盘点)
+        run: |
+          echo "===== 清理前 ====="
+          echo "-- Releases --"; gh release list --limit 100 || true
+          echo "-- Tags --";     gh api "repos/$REPO/tags?per_page=100" -q '.[].name' || true
+          echo "-- Runs --";     gh run list --limit 1000 --json databaseId -q 'length' || true
+          echo "-- Artifacts --"; gh api "repos/$REPO/actions/artifacts?per_page=100" -q '.total_count' || true
+          echo "-- Caches --";   gh cache list --limit 100 --json id -q 'length' || true
+          echo "-- Branches --"; gh api "repos/$REPO/branches?per_page=100" -q '.[].name' || true
+
+      - name: Delete Releases(删除 Release 及其资产)
+        run: |
+          echo "===== 删除 Release（会连带删除其下所有固件资产）====="
+          gh release list --limit 100 --json tagName -q '.[].tagName' | while read -r t; do
+            [ -n "$t" ] || continue
+            echo "  -> 删除 release: $t"
+            gh release delete "$t" --yes --cleanup-tag || true
+          done
+
+      - name: Delete Tags(删除残留 Tag)
+        run: |
+          echo "===== 删除 Tag ====="
+          gh api "repos/$REPO/tags?per_page=100" -q '.[].name' | while read -r t; do
+            [ -n "$t" ] || continue
+            echo "  -> 删除 tag: $t"
+            gh api -X DELETE "repos/$REPO/git/refs/tags/$t" || true
+          done
+
+      - name: Delete Artifacts(删除产物)
+        run: |
+          echo "===== 删除 Artifacts ====="
+          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" -q '.artifacts[].id' | while read -r id; do
+            [ -n "$id" ] || continue
+            echo "  -> 删除 artifact: $id"
+            gh api -X DELETE "repos/$REPO/actions/artifacts/$id" || true
+          done
+
+      - name: Delete Caches(删除 Actions 缓存)
+        run: |
+          echo "===== 删除 Caches ====="
+          gh cache list --limit 100 --json id -q '.[].id' | while read -r id; do
+            [ -n "$id" ] || continue
+            echo "  -> 删除 cache: $id"
+            gh cache delete "$id" || true
+          done
+
+      - name: Delete Workflow Runs(删除运行记录)
+        run: |
+          echo "===== 删除运行记录（跳过本次 $SELF_RUN）====="
+          gh run list --limit 1000 --json databaseId -q '.[].databaseId' | while read -r id; do
+            [ -n "$id" ] || continue
+            [ "$id" = "$SELF_RUN" ] && { echo "  -> 跳过本次运行 $id"; continue; }
+            echo "  -> 删除 run: $id"
+            gh run delete "$id" || true
+          done
+
+      - name: Delete Diag Branch(删除诊断分支)
+        run: |
+          echo "===== 删除 diag-branch ====="
+          gh api -X DELETE "repos/$REPO/git/refs/heads/diag-branch" || true
+
+      - name: Inventory After(清理后盘点)
+        run: |
+          echo "===== 清理后 ====="
+          echo -n "Releases 剩余: "; gh release list --limit 100 --json tagName -q 'length' || echo "?"
+          echo -n "Tags 剩余: ";     gh api "repos/$REPO/tags?per_page=100" -q 'length' || echo "?"
+          echo -n "Artifacts 剩余: "; gh api "repos/$REPO/actions/artifacts?per_page=100" -q '.total_count' || echo "?"
+          echo -n "Caches 剩余: ";   gh cache list --limit 100 --json id -q 'length' || echo "?"
+          echo "-- Branches --";    gh api "repos/$REPO/branches?per_page=100" -q '.[].name' || true
+          echo "-- 运行记录剩余（不含本次）--"; gh run list --limit 1000 --json databaseId -q 'length' || echo "?"
+
+      # 最后一步才删自己：
+      #   前面任何一步失败时，本次运行记录会保留下来，日志可供排查；
+      #   全部成功后才把自己从历史里抹掉 —— 于是"跑完发现一条记录都不剩"
+      #   本身就是最好的成功信号。
+      - name: Delete Self Run(删除本次运行记录)
+        run: |
+          echo "===== 删除本次运行 $SELF_RUN ====="
+          sleep 5
+          gh api -X DELETE "repos/$REPO/actions/runs/$SELF_RUN" || true

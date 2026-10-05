@@ -32,12 +32,14 @@ BASE_NAME = "IPQ60XX.config"
 #        否则会留下「有翻译没应用」的孤儿包。
 # ============================================================
 MINIMAL_DROP = [
-    "coreutils", "coreutils-sort", "coreutils-xxd",
+    # 注：coreutils-xxd / kmod-tunnel4 / kmod-sqm / watchdog 已从基准档删除
+    #     （本分支不存在这些包），这里就不必再列了。
+    "coreutils", "coreutils-sort",
     "htop", "openssh-client-utils", "terminfo",
-    "kmod-gre", "kmod-ipip", "kmod-tunnel4", "kmod-vxlan",
-    "kmod-sqm", "kmod-sched-cake", "sqm-scripts-nss",
+    "kmod-gre", "kmod-ipip", "kmod-vxlan",
+    "kmod-sched-cake", "sqm-scripts-nss",
     "luci-app-sqm", "luci-app-upnp", "luci-app-wol",
-    "luci-app-package-manager", "ttyd", "watchdog", "logrotate",
+    "luci-app-package-manager", "ttyd", "logrotate",
     # 上面那些 LuCI 应用配套的翻译包，一并去掉
     "luci-i18n-sqm-zh-cn", "luci-i18n-upnp-zh-cn",
 ]
@@ -59,7 +61,6 @@ CONFIG_PACKAGE_luci-app-nlbwmon=y
 CONFIG_PACKAGE_luci-app-watchcat=y
 CONFIG_PACKAGE_luci-app-autoreboot=y
 CONFIG_PACKAGE_luci-app-arpbind=y
-CONFIG_PACKAGE_luci-app-accesscontrol=y
 CONFIG_PACKAGE_luci-app-vlmcsd=y
 CONFIG_PACKAGE_luci-app-smartdns=y
 CONFIG_PACKAGE_luci-app-ttyd=y
@@ -68,7 +69,6 @@ CONFIG_PACKAGE_luci-app-diskman=y
 CONFIG_PACKAGE_luci-app-netdata=y
 CONFIG_PACKAGE_luci-app-openvpn=y
 CONFIG_PACKAGE_luci-app-wifischedule=y
-CONFIG_PACKAGE_luci-app-filetransfer=y
 
 # ---------- 中文界面 ----------
 CONFIG_PACKAGE_luci-i18n-commands-zh-cn=y
@@ -78,7 +78,6 @@ CONFIG_PACKAGE_luci-i18n-nlbwmon-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-watchcat-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-autoreboot-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-arpbind-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-accesscontrol-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-vlmcsd-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
@@ -87,14 +86,13 @@ CONFIG_PACKAGE_luci-i18n-diskman-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-netdata-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-openvpn-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-wifischedule-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-filetransfer-zh-cn=y
 
 # ---------- 命令行工具 ----------
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_nano=y
 CONFIG_PACKAGE_tmux=y
 CONFIG_PACKAGE_iperf3=y
-CONFIG_PACKAGE_mtr=y
+CONFIG_PACKAGE_mtr-json=y
 CONFIG_PACKAGE_tcpdump=y
 CONFIG_PACKAGE_openssl-util=y
 
@@ -114,14 +112,14 @@ CONFIG_PACKAGE_e2fsprogs=y
 # ============================================================
 WIFI_PKGS = [
     "kmod-ath11k", "kmod-ath11k-ahb", "kmod-ath11k-pci",
-    "ath11k-firmware-ipq6018", "ath11k-firmware-default",
+    "ath11k-firmware-ipq6018",
     "wpad-basic-mbedtls",
 ]
 
 # 这些包在基准里没有出现，但要显式关掉，避免被别的依赖悄悄拉回来
 NOWIFI_EXPLICIT_OFF = [
     "kmod-ath11k", "kmod-ath11k-ahb", "kmod-ath11k-pci",
-    "ath11k-firmware-ipq6018", "ath11k-firmware-default",
+    "ath11k-firmware-ipq6018",
     "wpad-basic-mbedtls", "wpad-basic-openssl", "wpad-openssl",
     "hostapd", "wpa-supplicant", "iw", "iwinfo",
     "luci-app-wifischedule",
@@ -205,9 +203,6 @@ def main():
 
     # ---------------- 无无线档 ----------------
     nowifi = drop_pkg(base, set(WIFI_PKGS))
-    nowifi = drop_symbol(nowifi, {"CONFIG_WPA_MBEDTLS_CRYPTO",
-                                  "CONFIG_WPA_11KV_SUPPORT",
-                                  "CONFIG_WPA_11R_SUPPORT"})
     nowifi = swap_header(
         nowifi,
         "京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01）—— 无无线满血 NSS",
@@ -216,11 +211,7 @@ def main():
         ["# ---------- 显式关掉一切无线相关（核心差异）----------",
          "# 这些包在基准档里没出现，但写 =n 能防止被其它依赖悄悄拉回来。"] +
         ["CONFIG_PACKAGE_%s=n" % p for p in NOWIFI_EXPLICIT_OFF] +
-        ["", "# WPA 相关开关在无无线档下没有意义，一并关掉",
-         "# CONFIG_WPA_MBEDTLS_CRYPTO is not set",
-         "# CONFIG_WPA_11KV_SUPPORT is not set",
-         "# CONFIG_WPA_11R_SUPPORT is not set",
-         ""])
+        [""])
     write("NoWiFi.config", nowifi)
 
 

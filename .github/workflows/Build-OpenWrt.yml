@@ -27,10 +27,6 @@ on:
       artifact_prefix:
         required: true
         type: string
-      manifest_file:
-        required: false
-        type: string
-        default: ''
       release_summary:
         required: false
         type: string
@@ -132,10 +128,6 @@ on:
         description: '产物前缀'
         required: true
         default: 'IPQ60XX'
-      manifest_file:
-        description: 'manifest 文件名（可留空）'
-        required: false
-        default: ''
       release_summary:
         description: 'Release 说明'
         required: false
@@ -336,7 +328,8 @@ jobs:
           ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
         run: |
           cd "$OPENWRT_PATH"
-          SONAME="${REPO_URL##*/}"
+          # （旧版这里有一行 SONAME="${REPO_URL##*/}"，但本步骤并没有注入 REPO_URL，
+          #   取到的是空串，且 SONAME 后面也没被用到 —— 已删除。）
           ARTIFACT_NAME="firmware-${ARTIFACT_PREFIX}"
           HASH="$(git rev-parse HEAD)"; HASH="${HASH:0:7}"
           CACHE_PREFIX="openwrt-${RUNNER_OS}-${ARTIFACT_PREFIX}-${HASH}"
@@ -378,17 +371,19 @@ jobs:
             exit 1
           fi
           cp "$CONFIG_SRC" .config
+          # defconfig 之前先留一份快照，等下做 diff 才能发现「写了但本分支没有」的符号。
+          grep -E '^CONFIG_[A-Za-z0-9_]+=y$' .config | sort -u > /tmp/cfg_before.txt
           make defconfig
 
-          echo "--- 剔除本分支不存在的符号 ---"
-          grep -E '^CONFIG_[A-Z0-9_]+=y$' .config | sort -u | while read -r line; do
-            k="${line%%=*}"
-            if grep -q "^# ${k} is not set" .config; then
-              echo "[drop] ${k}"
-              sed -i "\|^${k}=y\$|d" .config
-            fi
+          # 旧版这里是一个「同一符号既 =y 又是 # not set 就删掉」的循环，
+          # 但 defconfig 已经把未知符号清干净了，那个条件永不成立 —— 纯空转。
+          # 改成 defconfig 前后做符号 diff，真正把无效符号报出来（只警告，不中断）。
+          echo "--- 本分支不存在的符号（defconfig 已丢弃，等于没写）---"
+          grep -E '^CONFIG_[A-Za-z0-9_]+=y$' .config | sort -u > /tmp/cfg_after.txt
+          comm -23 /tmp/cfg_before.txt /tmp/cfg_after.txt | while read -r line; do
+            [ -n "$line" ] || continue
+            echo "::warning::本分支无此符号，已被 defconfig 丢弃: ${line}"
           done
-          make defconfig
 
           echo "--- 关键项检查 ---"
           grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET)|DEVICE_jdcloud_re-ss-01' .config || true
@@ -549,6 +544,9 @@ jobs:
       # ---------- 失败诊断回写 ----------
       # 目的：把"哪一步、哪条命令、什么错误"写进仓库的一个独立分支，
       # 这样即使没有 token（读不到 Actions 日志），也能直接 clone 那个分支看原因。
+      # 权限：push 需要 contents:write。本文件 Build job 里虽然写的是 read，
+      #       但被复用调用时权限由【调用方】IPQ60XX-JDCloud.yml 的 permissions
+      #       覆盖（那里给了 contents:write），所以这一步是真能推上去的，无需修改。
       - name: Write Diagnostics On Failure(失败时回写诊断)
         if: failure()
         env:
@@ -649,14 +647,21 @@ jobs:
       - name: Delete Old Cache(清理旧缓存)
         env:
           GH_TOKEN: ${{ github.token }}
+          CCACHE_KEY: ${{ needs.Build.outputs.ccache_key }}
+          STAGING_KEY: ${{ needs.Build.outputs.staging_key }}
         run: |
-          for key in "${{ needs.Build.outputs.ccache_key }}" "${{ needs.Build.outputs.staging_key }}"; do
-            [ -n "$key" ] || continue
-            prefix="${key%-*}"; prefix="${prefix%-*}-"
-            gh cache list --repo "$GITHUB_REPOSITORY" --key "$prefix" --limit 100 --json id,key,createdAt 2>/dev/null \
-              | jq -r --arg k "$key" '.[] | select(.key != $k) | .id' \
-              | while read -r cid; do
+          # 前缀取到 artifact 一层：openwrt-Linux-IPQ60XX-
+          #   这样才能命中「旧源码提交」（<hash> 不同）留下的缓存。
+          #
+          # 关键：必须【同时】排除当次的 ccache 与 staging 两个 key。
+          #   这两个 key 共享同一前缀，旧写法在循环里只排除了当前的那个 key，
+          #   于是清 ccache 时把本次刚存的 staging 删掉、清 staging 时又把本次
+          #   ccache 删掉 —— 每次跑完缓存归零，二次编译永远退化成全量冷编译。
+          prefix="${CCACHE_KEY%-*}"; prefix="${prefix%-*}-"
+          gh cache list --repo "$GITHUB_REPOSITORY" --key "$prefix" --limit 100 --json id,key 2>/dev/null \
+            | jq -r --arg c "$CCACHE_KEY" --arg s "$STAGING_KEY" \
+                  '.[] | select(.key != $c and .key != $s) | .id' \
+            | while read -r cid; do
                   [ -n "$cid" ] || continue
                   gh cache delete --repo "$GITHUB_REPOSITORY" "$cid" || true
                 done
-          done

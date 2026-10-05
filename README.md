@@ -11,10 +11,10 @@
 ```
 .github/workflows/Build-OpenWrt.yml      # workflow_call 公共模板（Build / Release / Cleanup 三 job）
 .github/workflows/IPQ60XX-JDCloud.yml    # 亚瑟入口（手动表单 + push + 每周一 cron）
-configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，71 包）
-configs/IPQ60XX-minimal.config           # 极简档位（49 包，默认档）
-configs/IPQ60XX-full.config              # 全功能档位（120 包）
-configs/NoWiFi.config                    # 无无线档位（65 包）
+configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，64 包）
+configs/IPQ60XX-minimal.config           # 极简档位（46 包，默认档）
+configs/IPQ60XX-full.config              # 全功能档位（109 包）
+configs/NoWiFi.config                    # 无无线档位（59 包）
 configs/_gen_profiles.py                 # 由基准档自动派生三个档位（防止漂移）
 configs/README.md                        # 四档差异与包级对照（详细版）
 ci/diy.sh                                # 初始状态生成（LAN / 无线 / 主机名 / 密码 / cron）
@@ -74,10 +74,10 @@ ci/README.md                             # 自定义项完整对照表
 
 | 档位 | 配置文件 | 编入包数 | 与基准（标准）差异 | 定位 |
 | :--- | :--- | :-: | :--- | :--- |
-| **标准** | `IPQ60XX.config` | 71 | —（基准） | 精简满血 NSS，带 SQM/UPnP/WoL |
-| **极简** | `IPQ60XX-minimal.config` | 49 | **−22**（砍掉便利组件，含 2 个孤儿翻译） | 只要路由本职，最省 flash / 内存（**默认档**） |
-| **全功能** | `IPQ60XX-full.config` | 120 | **+49**（常用 LuCI 应用 + 工具 + USB 存储） | 家庭网关 + 轻 NAS，什么都想有 |
-| **无无线** | `NoWiFi.config` | 65 | **−6 无线包**（ath11k/wpad 改 `=n`，另加 13 条兜底 `=n`） | 关无线当纯有线路由 / 旁路由 |
+| **标准** | `IPQ60XX.config` | 64 | —（基准） | 精简满血 NSS，带 SQM/UPnP/WoL |
+| **极简** | `IPQ60XX-minimal.config` | 46 | **−18**（砍掉便利组件，含 2 个孤儿翻译） | 只要路由本职，最省 flash / 内存（**默认档**） |
+| **全功能** | `IPQ60XX-full.config` | 109 | **+45**（常用 LuCI 应用 + 工具 + USB 存储） | 家庭网关 + 轻 NAS，什么都想有 |
+| **无无线** | `NoWiFi.config` | 59 | **−5 无线包**（ath11k/wpad 改 `=n`，另加 12 条兜底 `=n`） | 关无线当纯有线路由 / 旁路由 |
 
 > ⚠️ 三个派生档位**不是手工维护的**——由 `configs/_gen_profiles.py` 从基准档 `IPQ60XX.config` 自动生成，
 > 改基准档后重跑生成器即可，四档不再各自漂移。
@@ -87,13 +87,13 @@ ci/README.md                             # 自定义项完整对照表
 | 类别 | 标准 | 极简 | 全功能 | 无无线 |
 | :--- | :-: | :-: | :-: | :-: |
 | NSS 满血卸载 | 5 | 5 | 5 | 5 |
-| 无线 ath11k | 6 | 6 | 8 | 0 |
-| 网络基础 | 22 | 15 | 22 | 22 |
-| LuCI 基础 | 14 | 12 | 30 | 14 |
-| LuCI 应用 | 5 | 1 | 21 | 5 |
-| 基础工具 | 19 | 10 | 26 | 19 |
+| 无线 ath11k | 5 | 5 | 7 | 0 |
+| 网络基础 | 18 | 13 | 18 | 18 |
+| LuCI 基础 | 14 | 12 | 28 | 14 |
+| LuCI 应用 | 5 | 1 | 19 | 5 |
+| 基础工具 | 17 | 10 | 24 | 17 |
 | USB / 存储 | 0 | 0 | 8 | 0 |
-| **合计** | **71** | **49** | **120** | **65** |
+| **合计** | **64** | **46** | **109** | **59** |
 
 ### 三、完整包清单（逐包对比）
 
@@ -115,7 +115,6 @@ ci/README.md                             # 自定义项完整对照表
 
 | 包名 | 标准 | 极简 | 全功能 | 无无线 |
 | :--- | :-: | :-: | :-: | :-: |
-| `ath11k-firmware-default` | ✓ | ✓ | ✓ | — |
 | `ath11k-firmware-ipq6018` | ✓ | ✓ | ✓ | — |
 | `kmod-ath11k` | ✓ | ✓ | ✓ | — |
 | `kmod-ath11k-ahb` | ✓ | ✓ | ✓ | — |
@@ -130,9 +129,7 @@ ci/README.md                             # 自定义项完整对照表
 | :--- | :-: | :-: | :-: | :-: |
 | `dnsmasq-full` | ✓ | ✓ | ✓ | ✓ |
 | `firewall4` | ✓ | ✓ | ✓ | ✓ |
-| `kmod-crypto-aes` | ✓ | ✓ | ✓ | ✓ |
 | `kmod-crypto-cbc` | ✓ | ✓ | ✓ | ✓ |
-| `kmod-crypto-sha2` | ✓ | ✓ | ✓ | ✓ |
 | `kmod-crypto-xts` | ✓ | ✓ | ✓ | ✓ |
 | `kmod-gre` | ✓ | — | ✓ | ✓ |
 | `kmod-ipip` | ✓ | — | ✓ | ✓ |
@@ -143,8 +140,6 @@ ci/README.md                             # 自定义项完整对照表
 | `kmod-pppoe` | ✓ | ✓ | ✓ | ✓ |
 | `kmod-pppox` | ✓ | ✓ | ✓ | ✓ |
 | `kmod-sched-cake` | ✓ | — | ✓ | ✓ |
-| `kmod-sqm` | ✓ | — | ✓ | ✓ |
-| `kmod-tunnel4` | ✓ | — | ✓ | ✓ |
 | `kmod-vxlan` | ✓ | — | ✓ | ✓ |
 | `nftables-json` | ✓ | ✓ | ✓ | ✓ |
 | `odhcp6c` | ✓ | ✓ | ✓ | ✓ |
@@ -169,13 +164,11 @@ ci/README.md                             # 自定义项完整对照表
 | `luci-i18n-package-manager-zh-cn` | ✓ | ✓ | ✓ | ✓ |
 | `luci-i18n-sqm-zh-cn` | ✓ | — | ✓ | ✓ |
 | `luci-i18n-upnp-zh-cn` | ✓ | — | ✓ | ✓ |
-| `luci-i18n-accesscontrol-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-arpbind-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-autoreboot-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-commands-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-ddns-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-diskman-zh-cn` | — | — | ✓ | — |
-| `luci-i18n-filetransfer-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-hd-idle-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-netdata-zh-cn` | — | — | ✓ | — |
 | `luci-i18n-nlbwmon-zh-cn` | — | — | ✓ | — |
@@ -195,13 +188,11 @@ ci/README.md                             # 自定义项完整对照表
 | `luci-app-sqm` | ✓ | — | ✓ | ✓ |
 | `luci-app-upnp` | ✓ | — | ✓ | ✓ |
 | `luci-app-wol` | ✓ | — | ✓ | ✓ |
-| `luci-app-accesscontrol` | — | — | ✓ | — |
 | `luci-app-arpbind` | — | — | ✓ | — |
 | `luci-app-autoreboot` | — | — | ✓ | — |
 | `luci-app-commands` | — | — | ✓ | — |
 | `luci-app-ddns` | — | — | ✓ | — |
 | `luci-app-diskman` | — | — | ✓ | — |
-| `luci-app-filetransfer` | — | — | ✓ | — |
 | `luci-app-hd-idle` | — | — | ✓ | — |
 | `luci-app-netdata` | — | — | ✓ | — |
 | `luci-app-nlbwmon` | — | — | ✓ | — |
@@ -229,10 +220,8 @@ ci/README.md                             # 自定义项完整对照表
 | `openssh-client-utils` | ✓ | — | ✓ | ✓ |
 | `coreutils` | ✓ | — | ✓ | ✓ |
 | `coreutils-sort` | ✓ | — | ✓ | ✓ |
-| `coreutils-xxd` | ✓ | — | ✓ | ✓ |
 | `htop` | ✓ | — | ✓ | ✓ |
 | `ttyd` | ✓ | — | ✓ | ✓ |
-| `watchdog` | ✓ | — | ✓ | ✓ |
 | `logrotate` | ✓ | — | ✓ | ✓ |
 | `terminfo` | ✓ | — | ✓ | ✓ |
 | `openssl-util` | — | — | ✓ | — |
@@ -240,7 +229,7 @@ ci/README.md                             # 自定义项完整对照表
 | `nano` | — | — | ✓ | — |
 | `tmux` | — | — | ✓ | — |
 | `iperf3` | — | — | ✓ | — |
-| `mtr` | — | — | ✓ | — |
+| `mtr-json` | — | — | ✓ | — |
 | `tcpdump` | — | — | ✓ | — |
 
 **USB / 存储**（仅全功能档）
@@ -260,11 +249,11 @@ ci/README.md                             # 自定义项完整对照表
 
 ### 四、关键说明
 
-- **极简档 −22 项**：在标准档基础上砍掉 `luci-app-sqm/upnp/wol/package-manager`、`kmod-sqm/sched-cake/sqm-scripts-nss`、`kmod-gre/ipip/tunnel4/vxlan`、`htop/ttyd/watchdog/coreutils*/logrotate/terminfo/openssh-client-utils`，以及 `luci-i18n-sqm/upnp-zh-cn`。
+- **极简档 −18 项**：在标准档基础上砍掉 `luci-app-sqm/upnp/wol/package-manager`、`kmod-sched-cake/sqm-scripts-nss`、`kmod-gre/ipip/vxlan`、`htop/ttyd/logrotate/terminfo/coreutils/coreutils-sort/openssh-client-utils`，以及 `luci-i18n-sqm/upnp-zh-cn`。
   - 注意它去掉了 `luci-app-package-manager`（LuCI 的「软件包」页面），之后装包得走 SSH 用 `apk add`；要回来就在表单 `extra_packages` 填 `luci-app-package-manager`。
   - 去掉了 `logrotate`，`ci/diy.sh` 会自动跳过日志轮转的 cron 行（脚本读 `.config` 判断），不留每天失败的定时任务。
-- **全功能档 +49 项**：17 个常用 LuCI 应用 + 对应 17 个中文语言包 + 7 个命令行工具（`bash/nano/tmux/iperf3/mtr/tcpdump/openssl-util`）+ 8 个 USB 存储/挂载（`kmod-usb3/storage/uas`、`block-mount`、`kmod-fs-{ext4,exfat,ntfs3}`、`e2fsprogs`）。
-- **无无线档 −6 无线包**：把 `ath11k-firmware-*`、`kmod-ath11k*`、`wpad-basic-mbedtls` 写成 `=n`，并额外加 13 条 `=n` 兜底（防止 `wpad` 等间接依赖把 ath11k 拉回）。
+- **全功能档 +45 项**：15 个常用 LuCI 应用 + 对应 15 个中文语言包 + 7 个命令行工具（`bash/nano/tmux/iperf3/mtr-json/tcpdump/openssl-util`）+ 8 个 USB 存储/挂载（`kmod-usb3/storage/uas`、`block-mount`、`kmod-fs-{ext4,exfat,ntfs3}`、`e2fsprogs`）。
+- **无无线档 −5 无线包**：把 `ath11k-firmware-ipq6018`、`kmod-ath11k*`、`wpad-basic-mbedtls` 写成 `=n`，并额外加 12 条 `=n` 兜底（防止 `wpad` 等间接依赖把 ath11k 拉回）。
 - **⚠️ 上网必备三件套（四档都有，缺一不可）**：`firewall4` + `nftables-json` + `kmod-ipt-nat`（外加 `kmod-ipt-conntrack`）。这三者任一缺失，**路由器能启动、能进 LuCI，但 NAT/防火墙不工作，有线上不了网**——很难从现象联想到是编译配置问题。基准档已固化，派生档继承，不会丢。
 
 > 更细的包级差异、命名规则踩坑、生成器用法见 [`configs/README.md`](configs/README.md)。
@@ -296,7 +285,9 @@ python3 configs/_gen_profiles.py
 - **NSS 固件是 `nss-firmware-ipq60xx`** —— 来自 feed `qosmio/nss-packages` 的 `firmware/nss-firmware`，
   它生成 ipq807x/ipq60xx/ipq50xx/default 四个包。**没有 `qca-nss-firmware` 这个包。**
 - **`ath11k-firmware-qcn5052` / `qcn5022` 在 25.12 不存在**。该源码已换成
-  `laipeng668/ath11k-firmware-ddwrt`，子包只有 `default / ipq5018 / ipq5018-qcn6122 / ipq6018 / ipq8074 / qcn9074`。
+  `laipeng668/ath11k-firmware-ddwrt`，子包只有
+  `ipq5018 / ipq5018-qcn6122 / ipq6018 / ipq8074 / qca2066 / qca6390`
+  —— **没有 `default` 这个子包**（旧配置写的 `ath11k-firmware-default` 是无效符号，已删除）。
   **IPQ60xx 必须选 `ath11k-firmware-ipq6018`**（QCN5052/QCN5022 闭源固件在这一组）。
 - `KernelPackage/xxx` 类符号**自动带 `kmod-` 前缀**（源码写 `KernelPackage/qca-nss-drv` → `kmod-qca-nss-drv`）；
   `firmware` 类**不加**前缀。

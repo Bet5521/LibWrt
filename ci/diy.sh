@@ -1,92 +1,206 @@
 #!/usr/bin/env bash
 # ============================================================
-#  diy.sh —— 编译前的个性化（由 Build-OpenWrt.yml 在 make 之前调用）
-#  作用：把默认主机名 / 时区 / 主机 IP / root 密码 / 自愈 cron 写进固件
-#  注意：本脚本在宿主机（runner）执行，**此时还没有 uci 命令**，
-#        所以只能改源码里的配置文件，不能调用 uci。
+#  diy.sh —— 编译前写入「初始状态」个性化配置
+#  由 Build-OpenWrt.yml 在 make 之前调用，执行位置 = 源码根目录。
+#
+#  ⚠ 本脚本运行在编译宿主机（runner）上，此时【没有 uci 命令】，
+#    所以这里只做两件事：
+#      1) 往 files/ 覆盖层里写静态文件（版权镜像原样带进固件）
+#      2) 生成 /etc/uci-defaults/* 脚本 —— 它在路由器【首次启动】时执行，
+#         那时 uci 可用，且执行时机在 config_generate 与 `wifi config`【之后】，
+#         所以脚本里设置的值一定是最终生效值（最可靠的方式）。
+#
+#  所有可调项都从环境变量读，未设置则用下面这套默认值。
 # ============================================================
 set -u
 
-# 工作目录 = 源码根（workflow 里已 cd 进去）
+# ---------------- 读取输入（带默认值） ----------------
+LAN_IP="${DIY_LAN_IP:-192.168.1.1}"
+LAN_NETMASK="${DIY_LAN_NETMASK:-255.255.255.0}"
+LAN_DNS="${DIY_LAN_DNS:-223.5.5.5}"
+HOSTNAME="${DIY_HOSTNAME:-LibWrt}"
+TIMEZONE="${DIY_TIMEZONE:-Asia/Shanghai}"
+ROOT_PASSWORD="${DIY_ROOT_PASSWORD:-}"
+
+WIFI_ENABLED="${DIY_WIFI_ENABLED:-on}"
+WIFI_SSID="${DIY_WIFI_SSID:-JDC-AX1800Pro}"
+WIFI_PASSWORD="${DIY_WIFI_PASSWORD:-password12345}"
+WIFI_COUNTRY="${DIY_WIFI_COUNTRY:-CN}"
+WIFI_CH_2G="${DIY_WIFI_CHANNEL_2G:-6}"
+WIFI_HT_2G="${DIY_WIFI_HTMODE_2G:-HE20}"
+WIFI_CH_5G="${DIY_WIFI_CHANNEL_5G:-36}"
+WIFI_HT_5G="${DIY_WIFI_HTMODE_5G:-HE80}"
+
+# 「开/关」统一成 0/1
+case "$(printf '%s' "$WIFI_ENABLED" | tr 'A-Z' 'a-z')" in
+  0|off|no|false|disable|disabled) WIFI_DISABLED=1 ;;
+  *)                                WIFI_DISABLED=0 ;;
+esac
+
 echo "[diy.sh] PWD=$PWD"
+echo "[diy.sh] LAN=$LAN_IP/$LAN_NETMASK DNS=$LAN_DNS host=$HOSTNAME tz=$TIMEZONE"
+echo "[diy.sh] WiFi enabled=$WIFI_ENABLED (disabled=$WIFI_DISABLED) ssid=$WIFI_SSID"
 
 BASE_FILES="package/base-files/files"
 [ -d "$BASE_FILES" ] || BASE_FILES="package/base-files"
 
-# ---------- 1) 主机名 / 时区 ----------
-if [ -f "$BASE_FILES/etc/config/system" ]; then
-  sed -i "s/option hostname.*/option hostname 'JDC-AX1800Pro'/" "$BASE_FILES/etc/config/system" 2>/dev/null || true
-  sed -i "s/option timezone.*/option timezone 'CST-8'/" "$BASE_FILES/etc/config/system" 2>/dev/null || true
-  sed -i "s/option zonename.*/option zonename 'Asia\/Shanghai'/" "$BASE_FILES/etc/config/system" 2>/dev/null || true
-  echo "[diy.sh] 已设置 hostname / timezone"
-else
-  echo "[diy.sh] 未找到 $BASE_FILES/etc/config/system，跳过"
-fi
+# 时区名 → POSIX TZ 字符串（config_generate 用的是 POSIX 串，不是 IANA 名）
+tz_posix() {
+  case "$1" in
+    Asia/Shanghai|Asia/Chongqing|Asia/Chungking|Asia/Harbin|Asia/Urumqi|PRC) echo 'CST-8' ;;
+    Asia/Hong_Kong|Asia/Macau|Asia/Taipei)                                   echo 'CST-8' ;;
+    Asia/Tokyo)                                                              echo 'JST-9' ;;
+    Asia/Seoul)                                                              echo 'KST-9' ;;
+    Asia/Singapore|Asia/Kuala_Lumpur|Asia/Manila)                            echo '<+08>-8' ;;
+    Asia/Bangkok|Asia/Jakarta|Asia/Ho_Chi_Minh)                              echo '<+07>-7' ;;
+    Asia/Kolkata|Asia/Calcutta)                                              echo 'IST-5:30' ;;
+    Asia/Dubai)                                                              echo '<+04>-4' ;;
+    UTC|Etc/UTC|GMT)                                                         echo 'UTC0' ;;
+    Europe/London)                                                           echo 'GMT0BST,M3.5.0/1,M10.5.0' ;;
+    Europe/Berlin|Europe/Paris|Europe/Rome|Europe/Madrid|Europe/Amsterdam)   echo 'CET-1CEST,M3.5.0,M10.5.0/3' ;;
+    Europe/Moscow)                                                           echo 'MSK-3' ;;
+    America/New_York)                                                        echo 'EST5EDT,M3.2.0,M11.1.0' ;;
+    America/Chicago)                                                         echo 'CST6CDT,M3.2.0,M11.1.0' ;;
+    America/Denver)                                                          echo 'MST7MDT,M3.2.0,M11.1.0' ;;
+    America/Los_Angeles)                                                     echo 'PST8PDT,M3.2.0,M11.1.0' ;;
+    Australia/Sydney|Australia/Melbourne)                                    echo 'AEST-10AEDT,M10.1.0,M4.1.0/3' ;;
+    *)                                                                       echo 'CST-8' ;;
+  esac
+}
+TZ_POSIX="$(tz_posix "$TIMEZONE")"
+echo "[diy.sh] TZ_POSIX=$TZ_POSIX"
 
-# ---------- 2) 默认主机 IP（默认保持 192.168.1.1，需要改就解开下面一行）----------
-# sed -i "s/option ipaddr.*/option ipaddr '192.168.1.1'/" "$BASE_FILES/etc/config/network" 2>/dev/null || true
+mkdir -p files/etc/config files/etc/uci-defaults files/etc/crontabs
 
-# ---------- 3) 默认 root 密码（默认空密码；要设密码就解开并替换哈希）----------
-# 生成哈希：openssl passwd -6 '你的密码'
-# sed -i "s|^root:[^:]*:|root:\$6\$xxxx:0:99999:7:::|" "$BASE_FILES/etc/shadow" 2>/dev/null || true
-
-# ---------- 4) 无线默认参数：按「稳」来（2.4G HE20 固定 ch6 / 5G HE80 固定 ch36）----------
-# 说明：亚瑟是 QCN5022(2.4G) + QCN5052(5G)，ath11k 下 5G 优先选非 DFS 信道
-mkdir -p files/etc/config
-if [ ! -f files/etc/config/wireless ]; then
-  cat > files/etc/config/wireless <<'EOF'
+# ============================================================
+#  1) 无线默认配置（静态文件）
+#     为什么可以直接预置：wifi-detect.uc 是按 `option path` 匹配复用已有
+#     配置项的（见 wifi-detect.uc 里 wlan[name].path == path），
+#     所以这里写好的 radio0/radio1 不会被重复生成覆盖。
+#     亚瑟 = QCN5022(2.4G) + QCN5052(5G)，ath11k 下 5G 优先选非 DFS 信道。
+# ============================================================
+cat > files/etc/config/wireless <<EOF
 config wifi-device 'radio0'
-        option type 'mac80211'
-        option path 'platform/soc@0/c000000.wifi'
-        option band '2g'
-        option channel '6'
-        option htmode 'HE20'
-        option cell_density '0'
-        option noscan '1'
-        option disabled '0'
+	option type 'mac80211'
+	option path 'platform/soc@0/c000000.wifi'
+	option band '2g'
+	option channel '${WIFI_CH_2G}'
+	option htmode '${WIFI_HT_2G}'
+	option country '${WIFI_COUNTRY}'
+	option cell_density '0'
+	option noscan '1'
+	option disabled '${WIFI_DISABLED}'
 
 config wifi-device 'radio1'
-        option type 'mac80211'
-        option path 'platform/soc@0/c000000.wifi+1'
-        option band '5g'
-        option channel '36'
-        option htmode 'HE80'
-        option cell_density '0'
-        option disabled '0'
+	option type 'mac80211'
+	option path 'platform/soc@0/c000000.wifi+1'
+	option band '5g'
+	option channel '${WIFI_CH_5G}'
+	option htmode '${WIFI_HT_5G}'
+	option country '${WIFI_COUNTRY}'
+	option cell_density '0'
+	option disabled '${WIFI_DISABLED}'
 
 config wifi-iface 'default_radio0'
-        option device 'radio0'
-        option network 'lan'
-        option mode 'ap'
-        option ssid 'JDC-AX1800Pro'
-        option encryption 'psk2'
-        option key 'password12345'
-        option disabled '0'
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid '${WIFI_SSID}'
+	option encryption 'psk2'
+	option key '${WIFI_PASSWORD}'
+	option disabled '${WIFI_DISABLED}'
 
 config wifi-iface 'default_radio1'
-        option device 'radio1'
-        option network 'lan'
-        option mode 'ap'
-        option ssid 'JDC-AX1800Pro_5G'
-        option encryption 'psk2'
-        option key 'password12345'
-        option disabled '0'
+	option device 'radio1'
+	option network 'lan'
+	option mode 'ap'
+	option ssid '${WIFI_SSID}_5G'
+	option encryption 'psk2'
+	option key '${WIFI_PASSWORD}'
+	option disabled '${WIFI_DISABLED}'
 EOF
-  echo "[diy.sh] 已写入默认无线配置（SSID=JDC-AX1800Pro / 密码 password12345，首次启动后请改）"
-else
-  echo "[diy.sh] files/etc/config/wireless 已存在，跳过"
-fi
+echo "[diy.sh] 已写入 files/etc/config/wireless"
 
-# ---------- 5) 自愈 cron：无线掉线自动重启 + 每天清日志 ----------
-if [ ! -f files/etc/crontabs/root ]; then
-  mkdir -p files/etc/crontabs
-  cat > files/etc/crontabs/root <<'EOF'
-# 每 5 分钟检查网关连通性，不通就重启无线
-*/5 * * * * ping -c1 -w2 192.168.1.1 >/dev/null 2>&1 || (wifi down; sleep 3; wifi up)
-# 每天 04:30 清理日志
+# ============================================================
+#  2) 首次启动自定义脚本（uci-defaults）
+#     时机：/etc/init.d/boot → uci_apply_defaults，位于 config_generate
+#           与 `/sbin/wifi config` 之后 → 这里设置的值即最终值。
+# ============================================================
+cat > files/etc/uci-defaults/99-diy-custom <<EOF
+#!/bin/sh
+# 由 CI 自动生成：应用「LAN 地址 / 主机名 / 时区 / 无线初始状态」
+# 返回 0 表示应用成功，OpenWrt 会把本脚本删除（只跑一次）。
+
+# ---------- LAN 地址 ----------
+uci -q set network.lan.proto='static'
+uci -q set network.lan.ipaddr='${LAN_IP}'
+uci -q set network.lan.netmask='${LAN_NETMASK}'
+
+# LAN 下发的 DNS（dhcp option 6）。先删再加，避免重复运行产生多条。
+uci -q delete dhcp.lan.dhcp_option 2>/dev/null
+uci -q add_list dhcp.lan.dhcp_option='6,${LAN_DNS}'
+
+# ---------- 主机名 / 时区 ----------
+uci -q set system.@system[-1].hostname='${HOSTNAME}'
+uci -q set system.@system[-1].timezone='${TZ_POSIX}'
+uci -q set system.@system[-1].zonename='${TIMEZONE}'
+
+# ---------- 无线初始状态 ----------
+# 遍历实际存在的 radio，避免在没检测到无线时写出空节
+for r in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(radio[0-9]*\)=.*/\1/p"); do
+	uci -q set wireless.\$r.disabled='${WIFI_DISABLED}'
+	uci -q set wireless.\$r.country='${WIFI_COUNTRY}'
+done
+for i in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(default_radio[0-9]*\)=.*/\1/p"); do
+	uci -q set wireless.\$i.disabled='${WIFI_DISABLED}'
+done
+uci -q set wireless.default_radio0.ssid='${WIFI_SSID}'
+uci -q set wireless.default_radio0.key='${WIFI_PASSWORD}'
+uci -q set wireless.default_radio1.ssid='${WIFI_SSID}_5G'
+uci -q set wireless.default_radio1.key='${WIFI_PASSWORD}'
+
+uci -q commit
+exit 0
+EOF
+chmod +x files/etc/uci-defaults/99-diy-custom
+echo "[diy.sh] 已写入 files/etc/uci-defaults/99-diy-custom"
+
+# ============================================================
+#  3) 自愈 cron（用配置好的 LAN IP 做探测）
+# ============================================================
+cat > files/etc/crontabs/root <<EOF
+# 每 5 分钟检查网关连通性，不通就重启无线（无线掉线自愈）
+*/5 * * * * ping -c1 -w2 ${LAN_IP} >/dev/null 2>&1 || (wifi down; sleep 3; wifi up)
+# 每天 04:30 强制轮转日志，防止写满 flash
 30 4 * * * logrotate -f /etc/logrotate.conf >/dev/null 2>&1
 EOF
-  echo "[diy.sh] 已写入自愈 cron"
+chmod 600 files/etc/crontabs/root
+echo "[diy.sh] 已写入 files/etc/crontabs/root（探测目标 ${LAN_IP}）"
+
+# ============================================================
+#  4) root 密码（可选；留空则保持默认无密码）
+# ============================================================
+if [ -n "$ROOT_PASSWORD" ]; then
+  if [ -f "$BASE_FILES/etc/shadow" ]; then
+    mkdir -p files/etc
+    cp -f "$BASE_FILES/etc/shadow" files/etc/shadow
+    HASH="$(printf '%s' "$ROOT_PASSWORD" | openssl passwd -6 -stdin 2>/dev/null || true)"
+    if [ -n "$HASH" ]; then
+      # 只替换第 2 个字段（密码），其余字段原样保留。
+      # 原始行是 root:::0:99999:7:::（9 字段，第 2 字段为空=无密码），
+      # 用 sed 替换前缀会丢字段导致老化参数错位（min 变成 99999），所以用 awk。
+      awk -F: -v h="$HASH" 'BEGIN{OFS=":"} $1=="root" && !d {$2=h; d=1} {print}' \
+        files/etc/shadow > files/etc/shadow.new && mv files/etc/shadow.new files/etc/shadow
+      chmod 600 files/etc/shadow
+      echo "[diy.sh] 已设置 root 密码（sha512-crypt）"
+    else
+      echo "[diy.sh] !! openssl 生成密码哈希失败，保持无密码"
+    fi
+  else
+    echo "[diy.sh] !! 未找到 $BASE_FILES/etc/shadow，跳过密码设置"
+  fi
+else
+  echo "[diy.sh] 未指定 root 密码，保持默认无密码"
 fi
 
 echo "[diy.sh] done"

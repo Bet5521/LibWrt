@@ -1,6 +1,13 @@
 # =============================================================
 #  京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01 / IPQ6000）云编译入口
 #  架构参照 LibWrt 作者本人的 laipeng668/openwrt-ci-roc
+#
+#  用法：Actions → 左栏 IPQ60XX-JDCloud-AX1800Pro → Run workflow
+#        表单里可直接改 LAN 地址 / 无线初始状态 / 组件，全部留空即用默认值。
+#
+#  注意：所有 with: 都写成 `${{ inputs.x || '默认值' }}`。
+#       因为 push / schedule 触发时没有 inputs 上下文，
+#       传空值会把模板里的默认值覆盖掉 —— 这个兜底是必须的。
 # =============================================================
 name: IPQ60XX-JDCloud-AX1800Pro
 
@@ -8,10 +15,106 @@ on:
   # 手动触发：仓库页面 Actions → IPQ60XX-JDCloud-AX1800Pro → Run workflow
   workflow_dispatch:
     inputs:
+      # ==================== 固件档位 ====================
+      config_file:
+        description: '固件档位（配置文件）'
+        type: choice
+        options:
+          - configs/IPQ60XX.config
+          - configs/IPQ60XX-minimal.config
+          - configs/IPQ60XX-full.config
+          - configs/NoWiFi.config
+        default: configs/IPQ60XX.config
+
+      # ==================== LAN / 系统 ====================
+      lan_ip:
+        description: 'LAN IP（路由器管理地址，如 192.168.10.1）'
+        required: false
+        default: '192.168.1.1'
+      lan_netmask:
+        description: 'LAN 子网掩码'
+        required: false
+        default: '255.255.255.0'
+      lan_dns:
+        description: 'LAN 下发的 DNS'
+        required: false
+        default: '223.5.5.5'
+      hostname:
+        description: '主机名'
+        required: false
+        default: 'JDC-AX1800Pro'
+      timezone:
+        description: '时区'
+        required: false
+        default: 'Asia/Shanghai'
+      root_password:
+        description: 'root/LuCI 密码（留空=无密码）'
+        required: false
+        default: ''
+
+      # ==================== 无线初始状态 ====================
+      wifi_enabled:
+        description: '无线初始状态（off = 开机不启用，之后可在 LuCI 里开）'
+        type: choice
+        options:
+          - 'on'
+          - 'off'
+        default: 'on'
+      wifi_ssid:
+        description: 'WiFi 名称（5G 会自动加 _5G 后缀）'
+        required: false
+        default: 'JDC-AX1800Pro'
+      wifi_password:
+        description: 'WiFi 密码（至少 8 位）'
+        required: false
+        default: 'password12345'
+      wifi_country:
+        description: '无线国家码'
+        required: false
+        default: 'CN'
+      wifi_channel_2g:
+        description: '2.4G 信道（1/6/11 互不干扰）'
+        required: false
+        default: '6'
+      wifi_htmode_2g:
+        description: '2.4G 频宽'
+        type: choice
+        options:
+          - 'HE20'
+          - 'HE40'
+          - 'HT20'
+          - 'HT40'
+        default: 'HE20'
+      wifi_channel_5g:
+        description: '5G 信道（36-48 / 149-165 为非 DFS）'
+        required: false
+        default: '36'
+      wifi_htmode_5g:
+        description: '5G 频宽'
+        type: choice
+        options:
+          - 'HE80'
+          - 'HE160'
+          - 'HE40'
+          - 'VHT80'
+        default: 'HE80'
+
+      # ==================== 组件 / 功能 ====================
+      extra_packages:
+        description: '额外加入的包（空格或逗号分隔，可多行）'
+        required: false
+        default: ''
+      remove_packages:
+        description: '要移除的包（空格或逗号分隔，可多行）'
+        required: false
+        default: ''
+
+      # ==================== 发布 ====================
       make_release:
         description: '编译成功后发布 Release'
         type: boolean
         default: true
+
   # 推送触发：只监听云编译自身相关文件，避免源码日常改动把构建刷爆
   push:
     branches:
@@ -19,8 +122,7 @@ on:
     paths:
       - '.github/workflows/Build-OpenWrt.yml'
       - '.github/workflows/IPQ60XX-JDCloud.yml'
-      - 'configs/IPQ60XX.config'
-      - 'configs/NoWiFi.config'
+      - 'configs/**'
       - 'ci/diy.sh'
   schedule:
     # 每周一 03:17 UTC（北京时间 11:17）自动重编一次
@@ -37,15 +139,39 @@ jobs:
       contents: write
       actions: write
     with:
+      # ---------- 基础 ----------
       repo_url: https://github.com/Bet5521/LibWrt.git
       repo_branch: 25.12-nss
-      config_file: configs/IPQ60XX.config
+      config_file: ${{ inputs.config_file || 'configs/IPQ60XX.config' }}
       firmware_tag: IPQ60XX-JDCloud
       artifact_prefix: IPQ60XX
       manifest_file: libwrt-qualcommax-ipq60xx.manifest
       make_release: ${{ github.event_name != 'workflow_dispatch' || inputs.make_release }}
+
+      # ---------- LAN / 系统 ----------
+      lan_ip: ${{ inputs.lan_ip || '192.168.1.1' }}
+      lan_netmask: ${{ inputs.lan_netmask || '255.255.255.0' }}
+      lan_dns: ${{ inputs.lan_dns || '223.5.5.5' }}
+      hostname: ${{ inputs.hostname || 'JDC-AX1800Pro' }}
+      timezone: ${{ inputs.timezone || 'Asia/Shanghai' }}
+      root_password: ${{ inputs.root_password || '' }}
+
+      # ---------- 无线 ----------
+      wifi_enabled: ${{ inputs.wifi_enabled || 'on' }}
+      wifi_ssid: ${{ inputs.wifi_ssid || 'JDC-AX1800Pro' }}
+      wifi_password: ${{ inputs.wifi_password || 'password12345' }}
+      wifi_country: ${{ inputs.wifi_country || 'CN' }}
+      wifi_channel_2g: ${{ inputs.wifi_channel_2g || '6' }}
+      wifi_htmode_2g: ${{ inputs.wifi_htmode_2g || 'HE20' }}
+      wifi_channel_5g: ${{ inputs.wifi_channel_5g || '36' }}
+      wifi_htmode_5g: ${{ inputs.wifi_htmode_5g || 'HE80' }}
+
+      # ---------- 组件 ----------
+      extra_packages: ${{ inputs.extra_packages || '' }}
+      remove_packages: ${{ inputs.remove_packages || '' }}
+
+      # ---------- Release 说明 ----------
       release_summary: >-
         京东云 AX1800 Pro 亚瑟（RE-SS-01 / IPQ6000，512MB RAM）。
         精简满血 NSS：kmod-qca-nss-{drv,ecm,crypto,dp} + nss-firmware-ipq60xx；
-        ath11k 无线（ath11k-firmware-ipq6018 + ipq-wifi-jdcloud_re-ss-01）；
-        不含 passwall / Docker / Samba 等大件。
+        ath11k 无线（ath11k-firmware-ipq6018 + ipq-wifi-jdcloud_re-ss-01）。

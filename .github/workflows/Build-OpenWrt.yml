@@ -39,6 +39,77 @@ on:
         required: false
         type: boolean
         default: true
+      # ==================== 按需自定义（全部可选，都有默认值）====================
+      # 说明：这一组输入让"每次点 Run workflow"都能改 LAN 地址 / 无线初始状态 / 组件。
+      #       类型统一用 string（而不是 boolean），是为了让 push / schedule 这类
+      #       没有 inputs 上下文的触发方式能用 `|| '默认值'` 兜底，避免被空值覆盖。
+      # ---------- LAN / 系统 ----------
+      lan_ip:
+        required: false
+        type: string
+        default: '192.168.1.1'
+      lan_netmask:
+        required: false
+        type: string
+        default: '255.255.255.0'
+      lan_dns:
+        required: false
+        type: string
+        default: '223.5.5.5'
+      hostname:
+        required: false
+        type: string
+        default: 'LibWrt'
+      timezone:
+        required: false
+        type: string
+        default: 'Asia/Shanghai'
+      root_password:
+        required: false
+        type: string
+        default: ''
+      # ---------- 无线 ----------
+      wifi_enabled:
+        required: false
+        type: string
+        default: 'on'
+      wifi_ssid:
+        required: false
+        type: string
+        default: 'JDC-AX1800Pro'
+      wifi_password:
+        required: false
+        type: string
+        default: 'password12345'
+      wifi_country:
+        required: false
+        type: string
+        default: 'CN'
+      wifi_channel_2g:
+        required: false
+        type: string
+        default: '6'
+      wifi_htmode_2g:
+        required: false
+        type: string
+        default: 'HE20'
+      wifi_channel_5g:
+        required: false
+        type: string
+        default: '36'
+      wifi_htmode_5g:
+        required: false
+        type: string
+        default: 'HE80'
+      # ---------- 组件 / 功能 ----------
+      extra_packages:
+        required: false
+        type: string
+        default: ''
+      remove_packages:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       repo_url:
@@ -74,6 +145,89 @@ on:
         required: false
         type: boolean
         default: true
+      # ---------- LAN / 系统 ----------
+      lan_ip:
+        description: 'LAN IP（路由器管理地址）'
+        required: false
+        default: '192.168.1.1'
+      lan_netmask:
+        description: 'LAN 子网掩码'
+        required: false
+        default: '255.255.255.0'
+      lan_dns:
+        description: 'LAN 下发的 DNS'
+        required: false
+        default: '223.5.5.5'
+      hostname:
+        description: '主机名'
+        required: false
+        default: 'LibWrt'
+      timezone:
+        description: '时区'
+        required: false
+        default: 'Asia/Shanghai'
+      root_password:
+        description: 'root 密码（留空=无密码）'
+        required: false
+        default: ''
+      # ---------- 无线 ----------
+      wifi_enabled:
+        description: '无线初始状态'
+        required: false
+        type: choice
+        options:
+          - 'on'
+          - 'off'
+        default: 'on'
+      wifi_ssid:
+        description: 'WiFi 名称（5G 会自动加 _5G 后缀）'
+        required: false
+        default: 'JDC-AX1800Pro'
+      wifi_password:
+        description: 'WiFi 密码（至少 8 位）'
+        required: false
+        default: 'password12345'
+      wifi_country:
+        description: '无线国家码'
+        required: false
+        default: 'CN'
+      wifi_channel_2g:
+        description: '2.4G 信道'
+        required: false
+        default: '6'
+      wifi_htmode_2g:
+        description: '2.4G 频宽/模式'
+        required: false
+        type: choice
+        options:
+          - 'HE20'
+          - 'HE40'
+          - 'HT20'
+          - 'HT40'
+        default: 'HE20'
+      wifi_channel_5g:
+        description: '5G 信道（36/149 非 DFS）'
+        required: false
+        default: '36'
+      wifi_htmode_5g:
+        description: '5G 频宽/模式'
+        required: false
+        type: choice
+        options:
+          - 'HE80'
+          - 'HE160'
+          - 'HE40'
+          - 'VHT80'
+        default: 'HE80'
+      # ---------- 组件 / 功能 ----------
+      extra_packages:
+        description: '额外加入的包（空格/逗号分隔，可多行）'
+        required: false
+        default: ''
+      remove_packages:
+        description: '要移除的包（空格/逗号分隔，可多行）'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -240,8 +394,79 @@ jobs:
           grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET)|DEVICE_jdcloud_re-ss-01' .config || true
           grep -E '^CONFIG_PACKAGE_(kmod-qca-nss|nss-firmware|ath11k-firmware)' .config | head -12 || true
 
-      # ---------- 6 自定义脚本（可选）----------
+      # ---------- 5.5 组件自定义（加包 / 去包，可选）----------
+      - name: Apply Package Selection(组件自定义)
+        env:
+          EXTRA_PACKAGES: ${{ inputs.extra_packages }}
+          REMOVE_PACKAGES: ${{ inputs.remove_packages }}
+        run: |
+          cd "$OPENWRT_PATH"
+          norm() {
+            printf '%s' "${1:-}" \
+              | sed 's/，/\n/g' \
+              | tr ',' '\n' | tr '\t' '\n' | tr ' ' '\n' \
+              | sed 's/^CONFIG_PACKAGE_//' | sed '/^$/d'
+          }
+          ADD="$(norm "$EXTRA_PACKAGES")"
+          DEL="$(norm "$REMOVE_PACKAGES")"
+
+          if [ -z "$ADD" ] && [ -z "$DEL" ]; then
+            echo "未指定额外组件，沿用 config 文件默认值"
+            exit 0
+          fi
+
+          while read -r p; do
+            [ -n "$p" ] || continue
+            sed -i "\|^CONFIG_PACKAGE_${p}=|d" .config
+            echo "CONFIG_PACKAGE_${p}=y" >> .config
+            echo "[+包] $p"
+          done <<< "$ADD"
+
+          while read -r p; do
+            [ -n "$p" ] || continue
+            sed -i "\|^CONFIG_PACKAGE_${p}=|d" .config
+            echo "CONFIG_PACKAGE_${p}=n" >> .config
+            echo "[-包] $p"
+          done <<< "$DEL"
+
+          make defconfig
+
+          echo "--- 校验生效情况 ---"
+          for p in $ADD; do
+            [ -n "$p" ] || continue
+            if grep -q "^CONFIG_PACKAGE_${p}=y$" .config; then
+              echo "[OK]   $p"
+            else
+              echo "::warning::包未生效（名字写错或本分支没有）: $p"
+            fi
+          done
+          for p in $DEL; do
+            [ -n "$p" ] || continue
+            if grep -qE "^CONFIG_PACKAGE_${p}=n$|^# CONFIG_PACKAGE_${p} is not set$" .config; then
+              echo "[已关] $p"
+            else
+              echo "::warning::未能关闭（可能被其他包依赖）: $p"
+            fi
+          done
+          echo "（未生效的包只警告，不中断编译）"
+
+      # ---------- 6 初始状态自定义：LAN / 无线 / 主机名 / 密码 ----------
       - name: Load Custom Configuration(加载自定义配置)
+        env:
+          DIY_LAN_IP: ${{ inputs.lan_ip }}
+          DIY_LAN_NETMASK: ${{ inputs.lan_netmask }}
+          DIY_LAN_DNS: ${{ inputs.lan_dns }}
+          DIY_HOSTNAME: ${{ inputs.hostname }}
+          DIY_TIMEZONE: ${{ inputs.timezone }}
+          DIY_ROOT_PASSWORD: ${{ inputs.root_password }}
+          DIY_WIFI_ENABLED: ${{ inputs.wifi_enabled }}
+          DIY_WIFI_SSID: ${{ inputs.wifi_ssid }}
+          DIY_WIFI_PASSWORD: ${{ inputs.wifi_password }}
+          DIY_WIFI_COUNTRY: ${{ inputs.wifi_country }}
+          DIY_WIFI_CHANNEL_2G: ${{ inputs.wifi_channel_2g }}
+          DIY_WIFI_HTMODE_2G: ${{ inputs.wifi_htmode_2g }}
+          DIY_WIFI_CHANNEL_5G: ${{ inputs.wifi_channel_5g }}
+          DIY_WIFI_HTMODE_5G: ${{ inputs.wifi_htmode_5g }}
         run: |
           cd "$OPENWRT_PATH"
           if [ -f "$GITHUB_WORKSPACE/ci/diy.sh" ]; then
@@ -249,6 +474,10 @@ jobs:
           else
             echo '无 ci/diy.sh，跳过'
           fi
+          echo "--- 自定义结果核对 ---"
+          echo "[network] $(grep -E "ipaddr|netmask" "$OPENWRT_PATH/package/base-files/files/etc/config/network" 2>/dev/null | tr -d '\t' | paste -sd' ' -)"
+          echo "[wireless]"
+          sed -n '1,30p' "$OPENWRT_PATH/files/etc/config/wireless" 2>/dev/null || echo '(未生成 wireless 自定义)'
 
       # ---------- 7 下载 dl（重试 3 次；报错属正常，见上游 issue #153）----------
       - name: Download DL Package(预下载源码包)
@@ -380,8 +609,12 @@ jobs:
             - ${{ inputs.release_summary }}
             - 固件源码：${{ inputs.repo_url }}
             - 源码分支：${{ inputs.repo_branch }}
-            - 默认地址：**192.168.1.1**，默认密码：**none**
             - 设备：京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01 / IPQ6000）
+            ### 🌐 网络初始状态
+            - 管理地址：**${{ inputs.lan_ip }}**（掩码 ${{ inputs.lan_netmask }}，DNS ${{ inputs.lan_dns }}）
+            - 主机名：${{ inputs.hostname }}　时区：${{ inputs.timezone }}
+            - 无线：**${{ inputs.wifi_enabled }}**　SSID：${{ inputs.wifi_ssid }} / ${{ inputs.wifi_ssid }}_5G
+            - 无线信道：2.4G ch${{ inputs.wifi_channel_2g }} ${{ inputs.wifi_htmode_2g }} ｜ 5G ch${{ inputs.wifi_channel_5g }} ${{ inputs.wifi_htmode_5g }}
             ### 🧊 版本
             - 内核：**${{ needs.Build.outputs.version_kernel }}**
             - 源码最后一次提交：${{ needs.Build.outputs.version_info }}

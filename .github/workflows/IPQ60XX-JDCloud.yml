@@ -5,12 +5,23 @@
 name: IPQ60XX-JDCloud-AX1800Pro
 
 on:
+  # 手动触发：仓库页面 Actions → IPQ60XX-JDCloud-AX1800Pro → Run workflow
   workflow_dispatch:
     inputs:
       make_release:
         description: '编译成功后发布 Release'
         type: boolean
         default: true
+  # 推送触发：只监听云编译自身相关文件，避免源码日常改动把构建刷爆
+  push:
+    branches:
+      - 25.12-nss
+    paths:
+      - '.github/workflows/Build-OpenWrt.yml'
+      - '.github/workflows/IPQ60XX-JDCloud.yml'
+      - 'configs/IPQ60XX.config'
+      - 'configs/NoWiFi.config'
+      - 'ci/diy.sh'
   schedule:
     # 每周一 03:17 UTC（北京时间 11:17）自动重编一次
     - cron: '17 3 * * 1'
@@ -32,7 +43,7 @@ jobs:
       firmware_tag: IPQ60XX-JDCloud
       artifact_prefix: IPQ60XX
       manifest_file: libwrt-qualcommax-ipq60xx.manifest
-      make_release: ${{ inputs.make_release || true }}
+      make_release: ${{ github.event_name != 'workflow_dispatch' || inputs.make_release }}
       release_summary: >-
         京东云 AX1800 Pro 亚瑟（RE-SS-01 / IPQ6000，512MB RAM）。
         精简满血 NSS：kmod-qca-nss-{drv,ecm,crypto,dp} + nss-firmware-ipq60xx；

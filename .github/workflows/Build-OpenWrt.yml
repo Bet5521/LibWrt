@@ -342,7 +342,7 @@ jobs:
     needs:
       - Build
       - Release
-    if: ${{ !cancelled() && needs.Build.result == 'success' }}
+    if: ${{ always() && needs.Build.result == 'success' }}
     permissions:
       actions: write
       contents: read

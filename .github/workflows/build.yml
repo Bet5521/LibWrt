@@ -61,14 +61,16 @@ jobs:
           trap 'st=$?; echo "FAILED CMD=[$BASH_COMMAND] exit=$st" >> diag.log' ERR
 
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get install -y \
             build-essential clang flex bison g++ g++-multilib gperf make \
-            perl perl-base \
-            gettext git gperf patch xz-utils rsync cpio file kmod mtd-utils \
-            libncurses-dev libssl-dev libtool libtool-bin autoconf automake \
-            libtool pkg-config protobuf-compiler python3-dev python3-pip \
-            unzip zlib1g-dev libc6-dev libgcc-9-dev libgmp-dev libmpfr-dev \
-            libmpc-dev ccache
+            perl perl-base patch xz-utils rsync cpio file kmod mtd-utils \
+            gawk gettext git libncurses-dev libssl-dev libtool libtool-bin \
+            autoconf automake libtool pkg-config protobuf-compiler \
+            python3-dev python3-pip unzip zlib1g-dev ccache \
+            || echo "[warn] 依赖安装未完全成功，继续往下跑（失败点会记在 diag.log）"
+          echo "--- 解释器自检 ---"
+          perl -v 2>&1 | head -1 || echo "perl 不存在"
+          command -v perl || echo "perl 不在 PATH（scripts/feeds 是 perl 脚本，缺它必 exit 127）"
           df -h / | tail -1
           echo "nproc = $(nproc)"
           free -g | head -2
@@ -288,6 +290,10 @@ jobs:
           set -x
           trap 'st=$?; echo "FAILED CMD=[$BASH_COMMAND] exit=$st" >> diag.log' ERR
 
+          echo "--- feeds 前置检查 ---"
+          ls -l scripts/feeds || echo "scripts/feeds 不存在"
+          head -1 scripts/feeds 2>/dev/null
+          perl -v 2>&1 | head -1 || echo "perl 不存在"
           ./scripts/feeds update -a
           ./scripts/feeds install -a || ./scripts/feeds install -a
           make defconfig

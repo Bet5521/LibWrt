@@ -256,12 +256,18 @@ jobs:
           bash -n diy.sh && echo '[diy.sh] syntax OK'
           ls -l config.minimal diy.sh
 
-      - name: '4 生成 .config（自动探测 jdcloud_re-ss-01 设备符号）'
+      - name: '4 拉取 feeds'
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a || ./scripts/feeds install -a
+          make defconfig
+          ls feeds/ 2>/dev/null | head -10
+
+      - name: '5 生成 .config（自动探测设备符号 + 剔除本分支不存在的包）'
         run: |
           cp config.minimal .config
-          make defconfig
 
-          python3 - <<'PYEOF' || true
+          python3 - <<'PYEOF'
           import glob, re
           pat = re.compile(r'(TARGET_[A-Z0-9_]*DEVICE_[A-Z0-9_]*)')
           found = set()
@@ -275,9 +281,8 @@ jobs:
                   continue
               if 'jdcloud_re-ss-01' in t.lower():
                   found |= set(pat.findall(t.upper()))
-          lines = '\n'.join('CONFIG_%s=y' % s for s in sorted(found)) + '\n'
-          if lines.strip():
-              open('.config', 'a').write(lines)
+          if found:
+              open('.config', 'a').write('\n'.join('CONFIG_%s=y' % s for s in sorted(found)) + '\n')
           print('[device-symbols]', sorted(found))
           PYEOF
 
@@ -295,28 +300,27 @@ jobs:
             'CONFIG_TARGET_ROOTFS_SQUASHFS=y' \
             'CONFIG_TARGET_ROOTFS_UBI=y' \
             >> .config
+
+          make defconfig
+
+          echo "=== 剔除 .config 里本分支不存在的符号（防止 make 解析时直接报错退出）==="
+          grep -E '^CONFIG_[A-Z0-9_]+=y$' .config | sort -u | while read -r line; do
+            k=${line%%=*}
+            if grep -q "^# ${k} is not set" .config; then
+              echo "[drop] 本分支无此包，已移除：${k}"
+              sed -i "/^${k}=y$/d" .config
+            fi
+          done
+
           make defconfig
           echo "=============== .config 摘要 ==============="
           grep -E "^(CONFIG_TARGET|CONFIG_PACKAGE_(kmod-ath11k|kmod-qca-nss|qca-nss|nss-firmware|ath11k-firmware|luci-base|luci-app))" .config | head -60
           echo "============================================"
 
-          echo "=== 自检：config.minimal 里写错/不存在的包名 ==="
-          grep '^CONFIG_PACKAGE_' config.minimal | sort -u | while read -r line; do
-            p=${line#CONFIG_PACKAGE_}
-            p=${p%%=*}
-            if grep -q "^CONFIG_PACKAGE_${p} is not set" .config; then
-              echo "[WARN] 包不存在或被剔除：${p}（检查拼写或该分支是否提供）"
-            fi
-          done
-          echo "=== 自检结束（只是提醒，不会中断编译）==="
-
-      - name: '5 个性化（diy.sh）'
+      - name: '6 个性化（diy.sh）'
         run: bash diy.sh
 
-      - name: '6 拉取 feeds'
-        run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a || ./scripts/feeds install -a
+          pts/feeds install -a
           make defconfig
 
       - name: '7 预下载 dl'

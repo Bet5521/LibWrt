@@ -1,0 +1,363 @@
+# =============================================================
+#  公共编译模板（架构参照 laipeng668/openwrt-ci-roc，即 LibWrt 作者本人的云编译项目）
+#  要点：
+#   1) 源码 git clone 到 /mnt/openwrt，不用 actions/checkout 拉大仓库
+#   2) 依赖用 LibWrt README 的官方完整清单
+#   3) make download 失败重试 3 次（make download 报错是正常现象，见上游 issue #153）
+#   4) make -j$(nproc) 失败自动降级 make -j1 V=s（拿到真正报错行）
+#   5) ccache + staging_dir 缓存，二次编译从 1~2 小时降到 10~20 分钟
+# =============================================================
+name: Build-OpenWrt
+
+on:
+  workflow_call:
+    inputs:
+      repo_url:
+        required: true
+        type: string
+      repo_branch:
+        required: true
+        type: string
+      config_file:
+        required: true
+        type: string
+      firmware_tag:
+        required: true
+        type: string
+      artifact_prefix:
+        required: true
+        type: string
+      manifest_file:
+        required: false
+        type: string
+        default: ''
+      release_summary:
+        required: false
+        type: string
+        default: '京东云 AX1800 Pro 亚瑟 · 精简满血 NSS'
+      make_release:
+        required: false
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: '源码仓库'
+        required: true
+        default: 'https://github.com/Bet5521/LibWrt.git'
+      repo_branch:
+        description: '源码分支'
+        required: true
+        default: '25.12-nss'
+      config_file:
+        description: 'config 文件路径'
+        required: true
+        default: 'configs/IPQ60XX.config'
+      firmware_tag:
+        description: 'Release tag'
+        required: true
+        default: 'IPQ60XX'
+      artifact_prefix:
+        description: '产物前缀'
+        required: true
+        default: 'IPQ60XX'
+      manifest_file:
+        description: 'manifest 文件名（可留空）'
+        required: false
+        default: ''
+      release_summary:
+        description: 'Release 说明'
+        required: false
+        default: '京东云 AX1800 Pro 亚瑟 · 精简满血 NSS'
+      make_release:
+        description: '是否发布 Release'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  OPENWRT_PATH: /mnt/openwrt
+  CONFIG_DIR: configs
+  TZ: Asia/Shanghai
+
+jobs:
+  Build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    outputs:
+      artifact_name: ${{ steps.vars.outputs.artifact_name }}
+      version_kernel: ${{ steps.source.outputs.version_kernel }}
+      version_info: ${{ steps.source.outputs.version_info }}
+      ccache_key: ${{ steps.vars.outputs.ccache_key }}
+      staging_key: ${{ steps.vars.outputs.staging_key }}
+    permissions:
+      contents: read
+    steps:
+      # ---------- 0 检出本仓库（只拉本仓库，很小）----------
+      - name: Checkout(检出本仓库)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Server Info(服务器信息)
+        run: |
+          echo "--- CPU ---"; grep -c ^processor /proc/cpuinfo
+          echo "--- 内存 ---"; free -h
+          echo "--- 磁盘 ---"; df -hT /
+
+      # ---------- 1 依赖（LibWrt README 官方清单）----------
+      - name: Initialization Environment(安装依赖)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -y update
+          sudo -E apt-get -y install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+            git gperf haveged help2man intltool jq libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+            libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev libfuse-dev libssl-dev libtool lrzsz \
+            genisoimage msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip libpython3-dev qemu-utils \
+            rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev \
+            zstd lz4 liblzma-dev
+          sudo -E systemctl daemon-reload
+          sudo timedatectl set-timezone "$TZ"
+          echo "--- 自检 ---"
+          for c in make gcc g++ perl patch gperf rsync unzip xz zstd; do
+            printf '%-10s %s\n' "$c" "$(command -v "$c" || echo MISSING)"
+          done
+
+      # ---------- 2 clone 源码到 /mnt/openwrt ----------
+      - name: Clone Source Code(克隆源码)
+        id: source
+        env:
+          REPO_URL: ${{ inputs.repo_url }}
+          REPO_BRANCH: ${{ inputs.repo_branch }}
+        run: |
+          sudo mkdir -p "$OPENWRT_PATH"
+          sudo chown -R "$(id -u):$(id -g)" "$OPENWRT_PATH"
+          for attempt in 1 2 3; do
+            if git clone --depth 1 -b "$REPO_BRANCH" --single-branch "$REPO_URL" "$OPENWRT_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::源码 clone 失败（已重试 3 次）"
+              exit 1
+            fi
+            echo "::warning::clone 失败，第 $attempt 次重试"
+            sudo rm -rf "$OPENWRT_PATH"; sudo mkdir -p "$OPENWRT_PATH"
+            sudo chown -R "$(id -u):$(id -g)" "$OPENWRT_PATH"
+            sleep $((attempt * 5))
+          done
+          cd "$OPENWRT_PATH"
+          ls -l scripts/feeds
+          head -1 scripts/feeds
+          VERSION_INFO="$(git show -s --date=short --format='时间: %cd<br/>内容: %s<br/>hash: %H')"
+          {
+            echo 'version_info<<EOF'
+            echo "$VERSION_INFO"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          KERNEL_VER="$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-* 2>/dev/null | head -n1 || true)"
+          echo "version_kernel=${KERNEL_VER:-unknown}" >> "$GITHUB_OUTPUT"
+
+      # ---------- 3 更新 feeds ----------
+      - name: Update Feeds(更新 feeds)
+        run: |
+          cd "$OPENWRT_PATH"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # ---------- 4 生成变量（缓存 key / 产物名）----------
+      - name: Generate Variables(生成变量)
+        id: vars
+        env:
+          CONFIG_FILE: ${{ inputs.config_file }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
+        run: |
+          cd "$OPENWRT_PATH"
+          SONAME="${REPO_URL##*/}"
+          ARTIFACT_NAME="firmware-${ARTIFACT_PREFIX}"
+          HASH="$(git rev-parse HEAD)"; HASH="${HASH:0:7}"
+          CACHE_PREFIX="openwrt-${RUNNER_OS}-${ARTIFACT_PREFIX}-${HASH}"
+          {
+            echo "artifact_name=$ARTIFACT_NAME"
+            echo "ccache_key=${CACHE_PREFIX}-ccache"
+            echo "staging_key=${CACHE_PREFIX}-staging"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "ARTIFACT_NAME=$ARTIFACT_NAME"
+          } >> "$GITHUB_ENV"
+
+      - name: Cache Ccache(缓存 ccache)
+        uses: actions/cache@v4
+        with:
+          key: ${{ steps.vars.outputs.ccache_key }}
+          restore-keys: |
+            openwrt-${{ runner.os }}-${{ inputs.artifact_prefix }}-ccache
+          path: ${{ env.OPENWRT_PATH }}/.ccache
+
+      - name: Cache Staging Directory(缓存工具链)
+        uses: actions/cache@v4
+        with:
+          key: ${{ steps.vars.outputs.staging_key }}
+          restore-keys: |
+            openwrt-${{ runner.os }}-${{ inputs.artifact_prefix }}-staging
+          path: ${{ env.OPENWRT_PATH }}/staging_dir
+
+      # ---------- 5 应用 config ----------
+      - name: Apply Config(应用 config)
+        env:
+          CONFIG_FILE: ${{ inputs.config_file }}
+        run: |
+          cd "$OPENWRT_PATH"
+          CONFIG_SRC="$GITHUB_WORKSPACE/$CONFIG_FILE"
+          if [ ! -f "$CONFIG_SRC" ]; then
+            echo "::error::找不到配置文件 $CONFIG_SRC"
+            ls -R "$GITHUB_WORKSPACE/$CONFIG_DIR" || true
+            exit 1
+          fi
+          cp "$CONFIG_SRC" .config
+          make defconfig
+
+          echo "--- 剔除本分支不存在的符号 ---"
+          grep -E '^CONFIG_[A-Z0-9_]+=y$' .config | sort -u | while read -r line; do
+            k="${line%%=*}"
+            if grep -q "^# ${k} is not set" .config; then
+              echo "[drop] ${k}"
+              sed -i "\|^${k}=y\$|d" .config
+            fi
+          done
+          make defconfig
+
+          echo "--- 关键项检查 ---"
+          grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET)|DEVICE_jdcloud_re-ss-01' .config || true
+          grep -E '^CONFIG_PACKAGE_(kmod-qca-nss|nss-firmware|ath11k-firmware)' .config | head -12 || true
+
+      # ---------- 6 自定义脚本（可选）----------
+      - name: Load Custom Configuration(加载自定义配置)
+        run: |
+          cd "$OPENWRT_PATH"
+          if [ -f "$GITHUB_WORKSPACE/ci/diy.sh" ]; then
+            bash "$GITHUB_WORKSPACE/ci/diy.sh" || echo "::warning::diy.sh 非 0 退出，继续"
+          else
+            echo '无 ci/diy.sh，跳过'
+          fi
+
+      # ---------- 7 下载 dl（重试 3 次；报错属正常，见上游 issue #153）----------
+      - name: Download DL Package(预下载源码包)
+        run: |
+          cd "$OPENWRT_PATH"
+          for attempt in 1 2 3; do
+            if make download -j"$(nproc)"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::make download 连续 3 次未全成功，仍继续编译（上游说明属正常）"
+              break
+            fi
+            echo "::warning::make download 第 $attempt 次未完成，清理残缺文件后重试"
+            find dl -type f -size -1024c -print -delete 2>/dev/null || true
+            sleep $((attempt * 5))
+          done
+          df -hT "$OPENWRT_PATH" | tail -1
+
+      # ---------- 8 编译（多线程失败自动降级单线程详细日志）----------
+      - name: Compile Firmware(开始编译)
+        run: |
+          cd "$OPENWRT_PATH"
+          echo "$(nproc) 线程编译"
+          make -j"$(nproc)" BUILD_LOG=1 || make -j1 V=s
+
+      # ---------- 9 整理产物 ----------
+      - name: Organize Files(整理产物)
+        id: organize
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
+        run: |
+          cd "$OPENWRT_PATH"/bin/targets/*/*
+          echo "--- 产物清单 ---"
+          ls -lh
+          cp "$OPENWRT_PATH/.config" "$ARTIFACT_PREFIX.config"
+          [ -f config.buildinfo ] && mv config.buildinfo "$ARTIFACT_PREFIX.config.buildinfo" || true
+          for f in *.manifest; do [ -e "$f" ] && mv "$f" "$ARTIFACT_PREFIX.manifest"; done
+          rm -rf packages feeds.buildinfo version.buildinfo sha256sums profiles.json || true
+          echo "firmware_path=$PWD" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Firmware Artifact(上传产物)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ steps.organize.outputs.firmware_path }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  Release:
+    runs-on: ubuntu-24.04
+    needs: Build
+    if: ${{ inputs.make_release }}
+    permissions:
+      contents: write
+    steps:
+      - name: Download Firmware Artifact(下载产物)
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.Build.outputs.artifact_name }}
+          path: artifacts/firmware
+
+      - name: Upload Firmware To Release(发布 Release)
+        uses: ncipollo/release-action@v1
+        with:
+          name: ${{ inputs.firmware_tag }}
+          tag: ${{ inputs.firmware_tag }}
+          allowUpdates: true
+          replacesArtifacts: true
+          artifactErrorsFailBuild: false
+          token: ${{ github.token }}
+          artifacts: artifacts/firmware/*
+          body: |
+            ### 📒 固件信息
+            - ${{ inputs.release_summary }}
+            - 固件源码：${{ inputs.repo_url }}
+            - 源码分支：${{ inputs.repo_branch }}
+            - 默认地址：**192.168.1.1**，默认密码：**none**
+            - 设备：京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01 / IPQ6000）
+            ### 🧊 版本
+            - 内核：**${{ needs.Build.outputs.version_kernel }}**
+            - 源码最后一次提交：${{ needs.Build.outputs.version_info }}
+            ### 💾 刷机对照
+            - `*-squashfs-sysupgrade.bin` → 网页「系统→备份/升级」直接刷（已有 OpenWrt 时首选）
+            - `*-squashfs-factory.bin` → U-Boot 首刷 / 跨固件平台刷
+            - `*-squashfs-recovery.bin` → 救砖
+            - 刷前确认 `mmcblk0p18` 为 2G 大分区布局
+
+  Cleanup:
+    runs-on: ubuntu-24.04
+    needs:
+      - Build
+      - Release
+    if: ${{ !cancelled() && needs.Build.result == 'success' }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete Old Cache(清理旧缓存)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for key in "${{ needs.Build.outputs.ccache_key }}" "${{ needs.Build.outputs.staging_key }}"; do
+            [ -n "$key" ] || continue
+            prefix="${key%-*}"; prefix="${prefix%-*}-"
+            gh cache list --repo "$GITHUB_REPOSITORY" --key "$prefix" --limit 100 --json id,key,createdAt 2>/dev/null \
+              | jq -r --arg k "$key" '.[] | select(.key != $k) | .id' \
+              | while read -r cid; do
+                  [ -n "$cid" ] || continue
+                  gh cache delete --repo "$GITHUB_REPOSITORY" "$cid" || true
+                done
+          done

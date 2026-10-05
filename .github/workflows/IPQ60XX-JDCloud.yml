@@ -1,0 +1,40 @@
+# =============================================================
+#  京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01 / IPQ6000）云编译入口
+#  架构参照 LibWrt 作者本人的 laipeng668/openwrt-ci-roc
+# =============================================================
+name: IPQ60XX-JDCloud-AX1800Pro
+
+on:
+  workflow_dispatch:
+    inputs:
+      make_release:
+        description: '编译成功后发布 Release'
+        type: boolean
+        default: true
+  schedule:
+    # 每周一 03:17 UTC（北京时间 11:17）自动重编一次
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  Build:
+    uses: ./.github/workflows/Build-OpenWrt.yml
+    permissions:
+      contents: write
+      actions: write
+    with:
+      repo_url: https://github.com/Bet5521/LibWrt.git
+      repo_branch: 25.12-nss
+      config_file: configs/IPQ60XX.config
+      firmware_tag: IPQ60XX-JDCloud
+      artifact_prefix: IPQ60XX
+      manifest_file: libwrt-qualcommax-ipq60xx.manifest
+      make_release: ${{ inputs.make_release || true }}
+      release_summary: >-
+        京东云 AX1800 Pro 亚瑟（RE-SS-01 / IPQ6000，512MB RAM）。
+        精简满血 NSS：kmod-qca-nss-{drv,ecm,crypto,dp} + nss-firmware-ipq60xx；
+        ath11k 无线（ath11k-firmware-ipq6018 + ipq-wifi-jdcloud_re-ss-01）；
+        不含 passwall / Docker / Samba 等大件。

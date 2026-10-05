@@ -46,6 +46,15 @@ jobs:
       REPO: ${{ github.repository }}
       SELF_RUN: ${{ github.run_id }}
     steps:
+      # 必须 checkout：gh 的 release/run/cache 子命令要靠工作目录里的 .git
+      # 推断目标仓库。没这一步会报 "failed to determine base repo:
+      # not a git repository"，然后被 || true 静默吞掉，看起来像成功其实没删。
+      - name: Checkout(检出本仓库)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
       - name: Inventory Before(清理前盘点)
         run: |
           echo "===== 清理前 ====="

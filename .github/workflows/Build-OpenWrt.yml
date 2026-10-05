@@ -272,8 +272,15 @@ jobs:
       - name: Compile Firmware(开始编译)
         run: |
           cd "$OPENWRT_PATH"
+          export COMPILE_LOG="$RUNNER_TEMP/compile.log"
+          echo "COMPILE_LOG=$COMPILE_LOG" >> "$GITHUB_ENV"
           echo "$(nproc) 线程编译"
-          make -j"$(nproc)" BUILD_LOG=1 || make -j1 V=s
+          # 先并行编译（快）；失败则降级单线程 + V=s 拿到真正的报错行。
+          # 两路输出都 tee 进日志，供失败诊断步骤回写。
+          make -j"$(nproc)" BUILD_LOG=1 2>&1 | tee -a "$COMPILE_LOG" || {
+            echo "::warning::并行编译失败，降级 make -j1 V=s 以定位报错"
+            make -j1 V=s 2>&1 | tee -a "$COMPILE_LOG"
+          }
 
       # ---------- 9 整理产物 ----------
       - name: Organize Files(整理产物)
@@ -297,6 +304,53 @@ jobs:
           path: ${{ steps.organize.outputs.firmware_path }}/*
           if-no-files-found: error
           retention-days: 30
+
+      # ---------- 失败诊断回写 ----------
+      # 目的：把"哪一步、哪条命令、什么错误"写进仓库的一个独立分支，
+      # 这样即使没有 token（读不到 Actions 日志），也能直接 clone 那个分支看原因。
+      - name: Write Diagnostics On Failure(失败时回写诊断)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          LOG="workflow-diag.txt"
+          {
+            echo "===== LibWrt 云编译失败诊断 ====="
+            echo "仓库   : $GITHUB_REPOSITORY"
+            echo "分支   : ${{ inputs.repo_branch }}"
+            echo "提交   : $GITHUB_SHA"
+            echo "事件   : $GITHUB_EVENT_NAME"
+            echo "运行号 : $GITHUB_RUN_NUMBER   run_id=$GITHUB_RUN_ID"
+            echo "时间   : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "----- 源码目录状态 -----"
+            ls -ld "$OPENWRT_PATH" 2>&1 || true
+            [ -d "$OPENWRT_PATH" ] && ls -l "$OPENWRT_PATH/scripts/feeds" 2>&1 || true
+            [ -d "$OPENWRT_PATH" ] && head -1 "$OPENWRT_PATH/scripts/feeds" 2>&1 || true
+            [ -d "$OPENWRT_PATH" ] && echo ".config 行数: $(wc -l < "$OPENWRT_PATH/.config" 2>/dev/null || echo NA)"
+            echo
+            echo "----- 关键工具 -----"
+            for c in make gcc g++ perl patch gperf rsync unzip xz zstd ccache; do
+              printf '%-8s %s\n' "$c" "$(command -v "$c" || echo MISSING)"
+            done
+            echo
+            echo "----- 若编译步骤留下日志则附上尾部 -----"
+            if [ -n "${COMPILE_LOG:-}" ] && [ -f "$COMPILE_LOG" ]; then
+              tail -n 200 "$COMPILE_LOG"
+            fi
+          } > "$LOG" 2>&1
+
+          # 注意：编译源码在 /mnt/openwrt（$GITHUB_WORKSPACE 之外），
+          # 所以这里回到 workspace（本仓库）做 orphan 分支提交，只会带上这一个日志文件。
+          cd "$GITHUB_WORKSPACE"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan diag-branch 2>/dev/null || git checkout diag-branch
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          git add -f "$LOG"
+          git commit -m "diag: run #$GITHUB_RUN_NUMBER 失败诊断（$GITHUB_SHA）" || exit 0
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" diag-branch || true
 
   Release:
     runs-on: ubuntu-24.04

@@ -307,6 +307,20 @@ jobs:
           KERNEL_VER="$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-* 2>/dev/null | head -n1 || true)"
           echo "version_kernel=${KERNEL_VER:-unknown}" >> "$GITHUB_OUTPUT"
 
+      # ---------- 2.5 补齐缺失的机型支持 ----------
+      # 有些源码（如 qosmio/openwrt-ipq @ 24.10-nss）不含本机型，
+      # 这里把设备树 / NSS dtsi / 机型定义补进去，并解除 source-only。
+      # 脚本幂等：源码已含该机型时直接跳过（25.12-nss 就是这种情况）。
+      - name: Inject Missing Device(补齐缺失机型)
+        run: |
+          INJ="$GITHUB_WORKSPACE/ci/device-jdcloud_re-ss-01/inject.sh"
+          if [ -f "$INJ" ]; then
+            chmod +x "$INJ"
+            "$INJ" "$OPENWRT_PATH"
+          else
+            echo "::notice::无机型注入脚本，跳过（源码应已自带该设备）。"
+          fi
+
       # ---------- 3 更新 feeds ----------
       - name: Update Feeds(更新 feeds)
         run: |

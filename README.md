@@ -25,6 +25,22 @@
 >
 > **已加保险**：编译前新增「目标机型预检」——机型不存在、或子目标为 `source-only`，
 > 会在 1 分钟内报错退出并列出该源码支持的机型，不会再出现"跑满一小时才莫名其妙失败"。
+>
+> ### 机型补齐（本分支的解决办法）
+> 既然源码不带这台设备，就在克隆之后**把缺失件补进去**：
+> `ci/device-jdcloud_re-ss-01/inject.sh` 会向源码树注入四样东西（幂等，源码已含机型则自动跳过）：
+>
+> | 补的件 | 落到源码的位置 | 作用 |
+> |---|---|---|
+> | `ipq6000-re-ss-01.dts` | `target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/` | 设备树：LED / 按键 / eMMC / 交换口 / WiFi 节点 |
+> | `ipq6018-nss.dtsi` | 同上 | IPQ6018 的 NSS 节点（`nss0` / `nss_crypto` / `nss-common`） |
+> | 机型定义 | 追加到 `image/ipq60xx.mk` | 让 `CONFIG_TARGET_DEVICE_..._DEVICE_jdcloud_re-ss-01` 生效 |
+> | 去掉 `source-only` | `ipq60xx/target.mk` | 否则该子目标不产镜像，刷不了机 |
+>
+> NSS 本体不需要补：qosmio `24.10-nss` 的内核已带
+> `0140-arm64-dts-qcom-ipq6018-add-NSS-reserved-memory.patch`（提供 `&nss_region`）
+> 及全套 `qca-nss-drv/ecm/clients/crypto` 补丁，feeds 也指向 `nss_packages;NSS-12.5-K6.x`。
+> 未挂 `ipq-wifi-jdcloud_re-ss-01`：上游无其校准文件，该包实为空包，挂上反而会导致打包失败。
 
 ## 目录结构
 

@@ -12,10 +12,10 @@
 .github/workflows/Build-OpenWrt.yml      # workflow_call 公共模板（Build / Release / Cleanup 三 job）
 .github/workflows/IPQ60XX-JDCloud.yml    # 亚瑟入口（手动表单 + push + 每周一 cron）
 .github/workflows/Cleanup-Build-Info.yml # 一键清空 Release/Tag/运行记录/产物/缓存（手动触发）
-configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，64 包）
-configs/IPQ60XX-minimal.config           # 极简档位（46 包，默认档）
-configs/IPQ60XX-full.config              # 全功能档位（109 包）
-configs/NoWiFi.config                    # 无无线档位（59 包）
+configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包）
+configs/IPQ60XX-minimal.config           # 极简档位（52 包，默认档）
+configs/IPQ60XX-full.config              # 全功能档位（115 包）
+configs/NoWiFi.config                    # 无无线档位（65 包）
 configs/_gen_profiles.py                 # 由基准档自动派生三个档位（防止漂移）
 configs/README.md                        # 四档差异与包级对照（详细版）
 ci/diy.sh                                # 初始状态生成（LAN / 无线 / 主机名 / 密码 / cron）
@@ -86,7 +86,7 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 | 内容 | 机制 |
 | --- | --- |
 | 组件 / 功能 | 追加 `CONFIG_PACKAGE_x=y/n` 进 `.config`，编译期决定 |
-| 无线参数 | **不预置**静态 `wireless`；首次启动由 `wifi config` 按真实硬件生成（path/band 正确），`99-diy-custom` 再逐 radio 读真实 `band` 套用信道/HT/SSID（避免 2.4G/5G 交叉） |
+| 无线参数 | **不预置**静态 `wireless`；首次启动由 `wifi config` 按真实硬件生成（path/band 正确），`99-diy-custom` 再**逐 radio 读真实 `band` 套用信道/HT/`hwmode`**（5G 必须 `hwmode=a` 才能开 AC/AX，否则 5G 退化为 20MHz、信道无法设置），以此避免 2.4G/5G 交叉与信道不可用 |
 | LAN / 主机名 / 时区 / 无线开关 | 生成 `/etc/uci-defaults/99-diy-custom`，**首次启动**时用 uci 应用。时机在 `config_generate` 与 `wifi config` 之后 → 一定是最终值 |
 | root 密码 | 预置 `files/etc/shadow`（awk 按字段替换，保持 9 字段格式） |
 | 无线掉线自愈 | `files/etc/crontabs/root` 每 5 分钟探测 `lan_ip`，不通就 `wifi down; up` |
@@ -112,10 +112,10 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 
 | 档位 | 配置文件 | 编入包数 | 与基准（标准）差异 | 定位 |
 | :--- | :--- | :-: | :--- | :--- |
-| **标准** | `IPQ60XX.config` | 64 | —（基准） | 精简满血 NSS，带 SQM/UPnP/WoL |
-| **极简** | `IPQ60XX-minimal.config` | 46 | **−18**（砍掉便利组件，含 2 个孤儿翻译） | 只要路由本职，最省 flash / 内存（**默认档**） |
-| **全功能** | `IPQ60XX-full.config` | 109 | **+45**（常用 LuCI 应用 + 工具 + USB 存储） | 家庭网关 + 轻 NAS，什么都想有 |
-| **无无线** | `NoWiFi.config` | 59 | **−5 无线包**（ath11k/wpad 改 `=n`，另加 12 条兜底 `=n`） | 关无线当纯有线路由 / 旁路由 |
+| **标准** | `IPQ60XX.config` | 70 | —（基准） | 精简满血 NSS，带 SQM/UPnP/WoL |
+| **极简** | `IPQ60XX-minimal.config` | 52 | **−18**（砍掉便利组件，含 2 个孤儿翻译） | 只要路由本职，最省 flash / 内存（**默认档**） |
+| **全功能** | `IPQ60XX-full.config` | 115 | **+45**（常用 LuCI 应用 + 工具 + USB 存储） | 家庭网关 + 轻 NAS，什么都想有 |
+| **无无线** | `NoWiFi.config` | 65 | **−5 无线包**（ath11k/wpad 改 `=n`，另加 12 条兜底 `=n`） | 关无线当纯有线路由 / 旁路由 |
 
 > ⚠️ 三个派生档位**不是手工维护的**——由 `configs/_gen_profiles.py` 从基准档 `IPQ60XX.config` 自动生成，
 > 改基准档后重跑生成器即可，四档不再各自漂移。
@@ -126,8 +126,8 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 | :--- | :-: | :-: | :-: | :-: |
 | NSS 满血卸载 | 5 | 5 | 5 | 5 |
 | 无线 ath11k | 5 | 5 | 7 | 0 |
-| 网络基础 | 18 | 13 | 18 | 18 |
-| LuCI 基础 | 14 | 12 | 28 | 14 |
+| 网络基础 | 21 | 16 | 21 | 21 |
+| LuCI 基础 | 17 | 15 | 31 | 17 |
 | LuCI 应用 | 5 | 1 | 19 | 5 |
 | 基础工具 | 17 | 10 | 24 | 17 |
 | USB / 存储 | 0 | 0 | 8 | 0 |
@@ -197,6 +197,9 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 | `luci-proto-ipv6` | ✓ | ✓ | ✓ | ✓ |
 | `luci-proto-ppp` | ✓ | ✓ | ✓ | ✓ |
 | `luci-theme-bootstrap` | ✓ | ✓ | ✓ | ✓ |
+| `luci-theme-openwrt-2020` | ✓ | ✓ | ✓ | ✓ |
+| `luci-theme-material` | ✓ | ✓ | ✓ | ✓ |
+| `luci-theme-argon` | ✓ | ✓ | ✓ | ✓ |
 | `luci-i18n-base-zh-cn` | ✓ | ✓ | ✓ | ✓ |
 | `luci-i18n-firewall-zh-cn` | ✓ | ✓ | ✓ | ✓ |
 | `luci-i18n-package-manager-zh-cn` | ✓ | ✓ | ✓ | ✓ |

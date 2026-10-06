@@ -132,10 +132,12 @@ for r in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(radio[0-9]
 		2g)
 			uci -q set wireless.\$r.channel='${WIFI_CH_2G}'
 			uci -q set wireless.\$r.htmode='${WIFI_HT_2G}'
+			uci -q set wireless.\$r.hwmode='g'
 			;;
 		5g|6g)
 			uci -q set wireless.\$r.channel='${WIFI_CH_5G}'
 			uci -q set wireless.\$r.htmode='${WIFI_HT_5G}'
+			uci -q set wireless.\$r.hwmode='a'
 			;;
 	esac
 	uci -q set wireless.\$r.country='${WIFI_COUNTRY}'

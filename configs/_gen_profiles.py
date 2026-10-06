@@ -121,7 +121,7 @@ NOWIFI_EXPLICIT_OFF = [
     "kmod-ath11k", "kmod-ath11k-ahb", "kmod-ath11k-pci",
     "ath11k-firmware-ipq6018",
     "wpad-basic-mbedtls", "wpad-basic-openssl", "wpad-openssl",
-    "hostapd", "wpa-supplicant", "iw", "iwinfo",
+    "hostapd", "wpa-supplicant", "iw",
     "luci-app-wifischedule",
 ]
 

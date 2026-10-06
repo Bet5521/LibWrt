@@ -11,9 +11,9 @@
 
 | 选项 | 包数 | 说明 |
 | :--- | :--: | :--- |
-| `configs/IPQ60XX-minimal.config` | 49 | **极简**（默认）：去掉 SQM/UPnP/WoL/ttyd/htop/watchdog/logrotate 等便利组件，最省 flash |
-| `configs/IPQ60XX.config` | 71 | **标准**：精简满血 NSS + 无线 + SQM/UPnP/WoL + 基础 LuCI |
-| `configs/IPQ60XX-full.config` | 120 | **全功能**：额外加常用 LuCI 应用 + 命令行工具 + USB 存储支持 |
+| `configs/IPQ60XX-minimal.config` | 52 | **极简**（默认）：去掉 SQM/UPnP/WoL/ttyd/htop/watchdog/logrotate 等便利组件，最省 flash |
+| `configs/IPQ60XX.config` | 70 | **标准**：精简满血 NSS + 无线 + SQM/UPnP/WoL + 基础 LuCI |
+| `configs/IPQ60XX-full.config` | 115 | **全功能**：额外加常用 LuCI 应用 + 命令行工具 + USB 存储支持 |
 | `configs/NoWiFi.config` | 65 | **无无线**：不编 ath11k 与 wpad（当纯有线路由用） |
 
 > 四个档位的逐包差异见 [`../configs/README.md`](../configs/README.md)。
@@ -75,7 +75,7 @@ remove_packages:
 | 内容 | 生效机制 |
 | :--- | :--- |
 | 组件 / 功能 | 直接写进 `.config`，编译时决定哪些包进固件 |
-| 无线初始参数 | **不预置**静态 `wireless`；首次启动由 `wifi config` 按真实硬件生成，再由 `99-diy-custom` 逐 radio 读真实 `band` 套用信道/HT/SSID（避免 2.4G/5G 交叉） |
+| 无线初始参数 | **不预置**静态 `wireless`；首次启动由 `wifi config` 按真实硬件生成，再由 `99-diy-custom` **逐 radio 读真实 `band` 套用信道/HT/`hwmode`**（5G 必须 `hwmode=a` 才能开 AC/AX，否则 5G 退化、信道不可设），避免 2.4G/5G 交叉与信道不可用 |
 | LAN / 主机名 / 时区 / 无线开关 | 生成 `/etc/uci-defaults/99-diy-custom`，**路由器首次启动时**用 uci 应用；时机在 `config_generate` 和 `wifi config` **之后**，所以是最终值 |
 | root 密码 | 预置 `/etc/shadow`（shadow 第 2 字段按 awk 精确替换，保持 9 字段格式） |
 | 无线掉线自愈 | 预置 `/etc/crontabs/root`，每 5 分钟探测 `lan_ip`，不通就 `wifi down; up` |

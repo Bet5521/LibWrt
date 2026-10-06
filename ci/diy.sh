@@ -115,9 +115,11 @@ uci -q set network.lan.proto='static'
 uci -q set network.lan.ipaddr='${LAN_IP}'
 uci -q set network.lan.netmask='${LAN_NETMASK}'
 
-# LAN 下发的 DNS（dhcp option 6）。先删再加，避免重复运行产生多条。
-uci -q delete dhcp.lan.dhcp_option 2>/dev/null
-uci -q add_list dhcp.lan.dhcp_option='6,${LAN_DNS}'
+# 路由器上游 DNS（dnsmasq 转发）。客户端默认由路由器做 DNS，
+# 用户在 LuCI「网络 → DHCP 和 DNS → DNS 转发」里即可随时改，
+# 不必去翻难找的 DHCP Option 字段。先删再加，避免重复运行产生多条。
+uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null
+uci -q add_list dhcp.@dnsmasq[0].server='${LAN_DNS}'
 
 # ---------- 主机名 / 时区 ----------
 uci -q set system.@system[-1].hostname='${HOSTNAME}'

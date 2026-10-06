@@ -75,7 +75,7 @@ remove_packages:
 | 内容 | 生效机制 |
 | :--- | :--- |
 | 组件 / 功能 | 直接写进 `.config`，编译时决定哪些包进固件 |
-| 无线初始参数 | 预置 `/etc/config/wireless`（`wifi-detect.uc` 按 `option path` 匹配复用，不会重复生成） |
+| 无线初始参数 | **不预置**静态 `wireless`；首次启动由 `wifi config` 按真实硬件生成，再由 `99-diy-custom` 逐 radio 读真实 `band` 套用信道/HT/SSID（避免 2.4G/5G 交叉） |
 | LAN / 主机名 / 时区 / 无线开关 | 生成 `/etc/uci-defaults/99-diy-custom`，**路由器首次启动时**用 uci 应用；时机在 `config_generate` 和 `wifi config` **之后**，所以是最终值 |
 | root 密码 | 预置 `/etc/shadow`（shadow 第 2 字段按 awk 精确替换，保持 9 字段格式） |
 | 无线掉线自愈 | 预置 `/etc/crontabs/root`，每 5 分钟探测 `lan_ip`，不通就 `wifi down; up` |

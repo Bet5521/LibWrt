@@ -86,7 +86,7 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 | 内容 | 机制 |
 | --- | --- |
 | 组件 / 功能 | 追加 `CONFIG_PACKAGE_x=y/n` 进 `.config`，编译期决定 |
-| 无线参数 | 预置 `files/etc/config/wireless`（`wifi-detect.uc` 按 `option path` 复用，不会重复生成） |
+| 无线参数 | **不预置**静态 `wireless`；首次启动由 `wifi config` 按真实硬件生成（path/band 正确），`99-diy-custom` 再逐 radio 读真实 `band` 套用信道/HT/SSID（避免 2.4G/5G 交叉） |
 | LAN / 主机名 / 时区 / 无线开关 | 生成 `/etc/uci-defaults/99-diy-custom`，**首次启动**时用 uci 应用。时机在 `config_generate` 与 `wifi config` 之后 → 一定是最终值 |
 | root 密码 | 预置 `files/etc/shadow`（awk 按字段替换，保持 9 字段格式） |
 | 无线掉线自愈 | `files/etc/crontabs/root` 每 5 分钟探测 `lan_ip`，不通就 `wifi down; up` |

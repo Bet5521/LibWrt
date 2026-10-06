@@ -37,6 +37,15 @@ case "$(printf '%s' "$WIFI_ENABLED" | tr 'A-Z' 'a-z')" in
   *)                                WIFI_DISABLED=0 ;;
 esac
 
+# 加密方式：没给密码就退回 open，避免 psk2 + 空 key 让 hostapd 起不来
+if [ -n "$WIFI_PASSWORD" ]; then
+  WIFI_ENC='psk2'
+  WIFI_KEY="$WIFI_PASSWORD"
+else
+  WIFI_ENC='none'
+  WIFI_KEY=''
+fi
+
 echo "[diy.sh] PWD=$PWD"
 echo "[diy.sh] LAN=$LAN_IP/$LAN_NETMASK DNS=$LAN_DNS host=$HOSTNAME tz=$TIMEZONE"
 echo "[diy.sh] WiFi enabled=$WIFI_ENABLED (disabled=$WIFI_DISABLED) ssid=$WIFI_SSID"
@@ -73,63 +82,33 @@ echo "[diy.sh] TZ_POSIX=$TZ_POSIX"
 mkdir -p files/etc/config files/etc/uci-defaults files/etc/crontabs
 
 # ============================================================
-#  1) 无线默认配置（静态文件）
-#     为什么可以直接预置：wifi-detect.uc 是按 `option path` 匹配复用已有
-#     配置项的（见 wifi-detect.uc 里 wlan[name].path == path），
-#     所以这里写好的 radio0/radio1 不会被重复生成覆盖。
-#     亚瑟 = QCN5022(2.4G) + QCN5052(5G)，ath11k 下 5G 优先选非 DFS 信道。
+#  1) 无线配置【不再】预置静态文件
+#     原因（已踩坑）：亚瑟 IPQ6000 的 radio0/radio1 与 2.4G/5G 的对应关系由
+#     驱动探测决定，编译期写死的 radio0=2g/radio1=5g 在很多固件里是反的，
+#     会导致「2.4G 与 5G 交叉、信道非法、无线未关联、5G 不可用」。
+#     正确做法：交给首次启动时的 `wifi config` 按真实硬件生成
+#     /etc/config/wireless（path/band 都正确），再由下面的 99-diy-custom
+#     按每个 radio 的真实 band 套用 SSID/信道/HT 模式（见第 2 段）。
 # ============================================================
-cat > files/etc/config/wireless <<EOF
-config wifi-device 'radio0'
-	option type 'mac80211'
-	option path 'platform/soc@0/c000000.wifi'
-	option band '2g'
-	option channel '${WIFI_CH_2G}'
-	option htmode '${WIFI_HT_2G}'
-	option country '${WIFI_COUNTRY}'
-	option cell_density '0'
-	option noscan '1'
-	option disabled '${WIFI_DISABLED}'
-
-config wifi-device 'radio1'
-	option type 'mac80211'
-	option path 'platform/soc@0/c000000.wifi+1'
-	option band '5g'
-	option channel '${WIFI_CH_5G}'
-	option htmode '${WIFI_HT_5G}'
-	option country '${WIFI_COUNTRY}'
-	option cell_density '0'
-	option disabled '${WIFI_DISABLED}'
-
-config wifi-iface 'default_radio0'
-	option device 'radio0'
-	option network 'lan'
-	option mode 'ap'
-	option ssid '${WIFI_SSID}'
-	option encryption 'psk2'
-	option key '${WIFI_PASSWORD}'
-	option disabled '${WIFI_DISABLED}'
-
-config wifi-iface 'default_radio1'
-	option device 'radio1'
-	option network 'lan'
-	option mode 'ap'
-	option ssid '${WIFI_SSID}_5G'
-	option encryption 'psk2'
-	option key '${WIFI_PASSWORD}'
-	option disabled '${WIFI_DISABLED}'
-EOF
-echo "[diy.sh] 已写入 files/etc/config/wireless"
+echo "[diy.sh] 跳过静态 wireless（交由首次启动 wifi config 按真实硬件生成）"
 
 # ============================================================
 #  2) 首次启动自定义脚本（uci-defaults）
 #     时机：/etc/init.d/boot → uci_apply_defaults，位于 config_generate
 #           与 `/sbin/wifi config` 之后 → 这里设置的值即最终值。
+#     关键：不假设 radio0=2g/radio1=5g，逐 radio 读真实 band 后套用。
 # ============================================================
 cat > files/etc/uci-defaults/99-diy-custom <<EOF
 #!/bin/sh
 # 由 CI 自动生成：应用「LAN 地址 / 主机名 / 时区 / 无线初始状态」
 # 返回 0 表示应用成功，OpenWrt 会把本脚本删除（只跑一次）。
+
+# ---------- 确保无线配置存在（按真实硬件探测生成） ----------
+# 首次启动若 /etc/config/wireless 缺失或不含任何 radio，先生成一遍，
+# 避免某些情况下 boot 阶段 wifi config 未触发导致无线全无。
+if [ ! -s /etc/config/wireless ] || [ "\$(uci -q show wireless 2>/dev/null | grep -c '=wifi-device')" = "0" ]; then
+	/sbin/wifi config 2>/dev/null || true
+fi
 
 # ---------- LAN 地址 ----------
 uci -q set network.lan.proto='static'
@@ -145,20 +124,39 @@ uci -q set system.@system[-1].hostname='${HOSTNAME}'
 uci -q set system.@system[-1].timezone='${TZ_POSIX}'
 uci -q set system.@system[-1].zonename='${TIMEZONE}'
 
-# ---------- 无线初始状态 ----------
-# 遍历实际存在的 radio，避免在没检测到无线时写出空节
-for r in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(radio[0-9]*\)=.*/\1/p"); do
-	uci -q set wireless.\$r.disabled='${WIFI_DISABLED}'
+# ---------- 无线：按每个 radio 的真实 band 套用 ----------
+WIFI_DISABLED='${WIFI_DISABLED}'
+for r in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(radio[0-9]*\)=wifi-device/\1/p"); do
+	band="\$(uci -q get wireless.\$r.band 2>/dev/null)"
+	case "\$band" in
+		2g)
+			uci -q set wireless.\$r.channel='${WIFI_CH_2G}'
+			uci -q set wireless.\$r.htmode='${WIFI_HT_2G}'
+			;;
+		5g|6g)
+			uci -q set wireless.\$r.channel='${WIFI_CH_5G}'
+			uci -q set wireless.\$r.htmode='${WIFI_HT_5G}'
+			;;
+	esac
 	uci -q set wireless.\$r.country='${WIFI_COUNTRY}'
+	uci -q set wireless.\$r.disabled="\$WIFI_DISABLED"
 done
-for i in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(default_radio[0-9]*\)=.*/\1/p"); do
-	uci -q set wireless.\$i.disabled='${WIFI_DISABLED}'
-done
-uci -q set wireless.default_radio0.ssid='${WIFI_SSID}'
-uci -q set wireless.default_radio0.key='${WIFI_PASSWORD}'
-uci -q set wireless.default_radio1.ssid='${WIFI_SSID}_5G'
-uci -q set wireless.default_radio1.key='${WIFI_PASSWORD}'
 
+# iface 跟随其 device 的 band 决定 SSID（5G 加 _5G 后缀）
+for i in \$(uci -q show wireless 2>/dev/null | sed -n "s/^wireless\.\(default_radio[0-9]*\)=wifi-iface/\1/p"); do
+	dev="\$(uci -q get wireless.\$i.device 2>/dev/null)"
+	band="\$(uci -q get wireless.\$dev.band 2>/dev/null)"
+	case "\$band" in
+		5g|6g) ssid='${WIFI_SSID}_5G' ;;
+		*)     ssid='${WIFI_SSID}' ;;
+	esac
+	uci -q set wireless.\$i.ssid="\$ssid"
+	uci -q set wireless.\$i.encryption='${WIFI_ENC}'
+	uci -q set wireless.\$i.key='${WIFI_KEY}'
+	uci -q set wireless.\$i.disabled="\$WIFI_DISABLED"
+done
+
+uci -q commit wireless
 uci -q commit
 exit 0
 EOF

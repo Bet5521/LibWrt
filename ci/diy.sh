@@ -115,9 +115,14 @@ uci -q set network.lan.proto='static'
 uci -q set network.lan.ipaddr='${LAN_IP}'
 uci -q set network.lan.netmask='${LAN_NETMASK}'
 
-# 路由器上游 DNS（dnsmasq 转发）。客户端默认由路由器做 DNS，
-# 用户在 LuCI「网络 → DHCP 和 DNS → DNS 转发」里即可随时改，
-# 不必去翻难找的 DHCP Option 字段。先删再加，避免重复运行产生多条。
+# 下发给客户端的 DNS（DHCP Option 6）。这样电脑 ipconfig /all 里
+# 「DNS 服务器」显示的就是这里的值，而不是路由器的 LAN 地址。
+# 改法（出厂后随时可改，不丢）：LuCI「网络 → 接口 → LAN → 编辑 →
+#   DHCP 服务器 → 高级设置 → DHCP 选项」，里面那一行就是 6,<你的DNS>。
+# 先删再加，避免重复运行产生多条。
+uci -q delete dhcp.lan.dhcp_option 2>/dev/null
+uci -q add_list dhcp.lan.dhcp_option='6,${LAN_DNS}'
+# 同时把路由器自身的上游 DNS 转发也指过去，保持一致（供把路由器当 DNS 的场景）。
 uci -q delete dhcp.@dnsmasq[0].server 2>/dev/null
 uci -q add_list dhcp.@dnsmasq[0].server='${LAN_DNS}'
 

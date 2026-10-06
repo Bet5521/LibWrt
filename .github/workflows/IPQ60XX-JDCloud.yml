@@ -5,6 +5,9 @@
 #  用法：Actions → 左栏 IPQ60XX-JDCloud-AX1800Pro → Run workflow
 #        表单里可直接改 LAN 地址 / 无线初始状态 / 组件，全部留空即用默认值。
 #
+#  本分支（24.10-nss）编译的是 OpenWrt 24.10 基线 + NSS 加速 + ath11k 无线，
+#  源码取自 qosmio/openwrt-ipq 的 24.10-nss 分支（IPQ60xx NSS 正统来源，自带正确 feeds）。
+#
 #  注意：本 workflow 仅支持手动触发（workflow_dispatch），无 push / schedule。
 #       所有 with: 都写成 `${{ inputs.x || '默认值' }}`，表单留空时用默认值兜底。
 # =============================================================
@@ -126,8 +129,10 @@ jobs:
       actions: write
     with:
       # ---------- 基础 ----------
-      repo_url: https://github.com/Bet5521/LibWrt.git
-      repo_branch: 25.12-nss
+      # 24.10 基线：源码直接拉 qosmio 的 IPQ60xx NSS 分支（自带正确的 NSS/wireless feeds）
+      # configs/ 与 ci/diy.sh 仍用本仓库（24.10-nss 分支）这一份，固件定制逻辑保持一致。
+      repo_url: https://github.com/qosmio/openwrt-ipq.git
+      repo_branch: 24.10-nss
       config_file: ${{ inputs.config_file || 'configs/IPQ60XX.config' }}
       # firmware_tag 不再由这里指定：模板会用
       #   <主机名>_<内核版本>_<config 名称>_<构建日期>

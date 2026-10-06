@@ -5,12 +5,19 @@
 > 源码基于 [LibWrt](https://github.com/LiBwrt/LibWrt) 的 `25.12-nss` NSS 分支。
 >
 > 所有固件均带 **NSS 满血卸载**（有线 datapath 走 NSS），默认 LAN `192.168.10.1`、无线开机启用。
+>
+> **另有 `24.10-nss` 分支**：编译 **OpenWrt 24.10 基线 + NSS 加速 + ath11k 无线** 固件。该分支的
+> `IPQ60XX-JDCloud.yml` 直接拉取 [qosmio/openwrt-ipq](https://github.com/qosmio/openwrt-ipq) 的 `24.10-nss`
+> 分支作源码（自带正确的 NSS/wireless feeds），`configs/` 与 `ci/diy.sh` 仍复用本仓库这一份。
+> 用法完全一致：切到 `24.10-nss` 分支 → 跑 `IPQ60XX-JDCloud-AX1800Pro` → Run workflow。
+> 注：24.10 配置以 25.12 档位为蓝本，`make defconfig` 会自动丢弃 24.10 不存在的包并告警（不致命），
+> 若想补回某包可在表单 `extra_packages` 里填包名。
 
 ## 目录结构
 
 ```
 .github/workflows/Build-OpenWrt.yml      # workflow_call 公共模板（Build / Release / Cleanup 三 job）
-.github/workflows/IPQ60XX-JDCloud.yml    # 亚瑟入口（手动表单 + push + 每周一 cron）
+.github/workflows/IPQ60XX-JDCloud.yml    # 亚瑟入口（仅手动触发 workflow_dispatch）
 .github/workflows/Cleanup-Build-Info.yml # 一键清空 Release/Tag/运行记录/产物/缓存（手动触发）
 configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包）
 configs/IPQ60XX-minimal.config           # 极简档位（52 包，默认档）

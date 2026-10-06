@@ -409,6 +409,51 @@ jobs:
           grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET)|DEVICE_jdcloud_re-ss-01' .config || true
           grep -E '^CONFIG_PACKAGE_(kmod-qca-nss|nss-firmware|ath11k-firmware)' .config | head -12 || true
 
+      # ---------- 5.2 目标 / 设备预检 ----------
+      # 踩过的坑：config 里写了 CONFIG_TARGET_DEVICE_<board>_<subtarget>_DEVICE_<dev>=y，
+      # 但源码树里根本没有这台设备 —— defconfig 会静默丢弃该符号，
+      # 于是编译能跑满 60~90 分钟，最后以莫名其妙的错误收场，且产物根本不是目标机型。
+      # 这里在编译前就把「机型不存在 / 子目标不产镜像」挡掉，1 分钟内给出可行动报错。
+      - name: Validate Target Device(目标机型预检)
+        run: |
+          cd "$OPENWRT_PATH"
+          BOARD="$(sed -n 's/^CONFIG_TARGET_BOARD="\(.*\)"$/\1/p' .config)"
+          SUBTARGET="$(sed -n 's/^CONFIG_TARGET_SUBTARGET="\(.*\)"$/\1/p' .config)"
+          RAW="$(grep -oE '^CONFIG_TARGET_DEVICE_[^=]*=y' .config | head -1)"
+          DEV="${RAW#CONFIG_TARGET_DEVICE_}"; DEV="${DEV%=y}"; DEV="${DEV#*_DEVICE_}"
+          echo "预检: BOARD=$BOARD SUBTARGET=$SUBTARGET DEVICE=${DEV:-<未指定>}"
+
+          if [ -z "$BOARD" ] || [ -z "$SUBTARGET" ]; then
+            echo "::error::.config 里没有有效的 CONFIG_TARGET_BOARD / CONFIG_TARGET_SUBTARGET"
+            exit 1
+          fi
+
+          IMG="target/linux/$BOARD/image/$SUBTARGET.mk"
+          if [ ! -f "$IMG" ]; then
+            echo "::error::源码树里没有 $IMG —— 该源码不支持 $BOARD/$SUBTARGET"
+            ls target/linux/ 2>/dev/null || true
+            exit 1
+          fi
+
+          # source-only 子目标只出源码、不产镜像，必然刷不了机，直接挡掉
+          TMK="target/linux/$BOARD/$SUBTARGET/target.mk"
+          if [ -f "$TMK" ] && grep -qE 'FEATURES[[:space:]]*\+?=.*source-only' "$TMK"; then
+            echo "::error::$TMK 里 FEATURES 含 source-only —— 该子目标不产镜像，编译无意义"
+            echo "请换用支持本机型的源码分支（见 README 的『源码与机型支持』一节）。"
+            exit 1
+          fi
+
+          if [ -n "$DEV" ]; then
+            if grep -qE "^TARGET_DEVICES \+= ${DEV}$" "$IMG"; then
+              echo "::notice::机型 $DEV 在源码中存在，目标有效。"
+            else
+              echo "::error::源码 $IMG 里没有机型 $DEV —— 当前源码不支持这台设备，编译注定失败。"
+              echo "--- 该源码 $BOARD/$SUBTARGET 支持的机型如下，请换分支或改 config ---"
+              grep -oE '^TARGET_DEVICES \+= .*' "$IMG" | awk '{print $3}' | sort || true
+              exit 1
+            fi
+          fi
+
       # ---------- 5.5 组件自定义（加包 / 去包，可选）----------
       - name: Apply Package Selection(组件自定义)
         env:

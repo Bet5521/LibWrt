@@ -118,7 +118,10 @@ on:
         default: true
 
 permissions:
-  contents: read
+  # 必须是 write：Build 失败时要往 diag-branch 回写诊断日志，
+  # Release 阶段也要建 Release / 传固件。之前写 read 导致诊断永远推不上去，
+  # 失败只能靠猜（日志接口需要管理员权限，外部读不到）。
+  contents: write
   actions: read
 
 jobs:

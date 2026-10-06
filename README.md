@@ -6,12 +6,25 @@
 >
 > 所有固件均带 **NSS 满血卸载**（有线 datapath 走 NSS），默认 LAN `192.168.10.1`、无线开机启用。
 >
-> **另有 `24.10-nss` 分支**：编译 **OpenWrt 24.10 基线 + NSS 加速 + ath11k 无线** 固件。该分支的
-> `IPQ60XX-JDCloud.yml` 直接拉取 [qosmio/openwrt-ipq](https://github.com/qosmio/openwrt-ipq) 的 `24.10-nss`
-> 分支作源码（自带正确的 NSS/wireless feeds），`configs/` 与 `ci/diy.sh` 仍复用本仓库这一份。
-> 用法完全一致：切到 `24.10-nss` 分支 → 跑 `IPQ60XX-JDCloud-AX1800Pro` → Run workflow。
-> 注：24.10 配置以 25.12 档位为蓝本，`make defconfig` 会自动丢弃 24.10 不存在的包并告警（不致命），
-> 若想补回某包可在表单 `extra_packages` 里填包名。
+> ### ⚠️ `24.10-nss` 分支：当前不可用（源码不支持本机型）
+> 该分支原计划把源码换成 [qosmio/openwrt-ipq](https://github.com/qosmio/openwrt-ipq) 的 `24.10-nss`，
+> 但实测该源码**不含京东云 RE-SS-01**，编译注定失败（已实跑验证，构建 #run 37479815957 失败）。
+>
+> | 源码 | 内核 | NSS | `jdcloud_re-ss-01` | 结论 |
+> |---|---|---|---|---|
+> | `Bet5521/LibWrt` @ **`25.12-nss`** | 6.12 | ✅ 满血卸载 | ✅ 有 | **可用（推荐）** |
+> | `qosmio/openwrt-ipq` @ `24.10-nss` | 6.6 | 仅 ipq807x；ipq60xx 标了 `source-only` | ❌ 无（ipq60xx.mk 仅 4 台设备） | 不可用 |
+> | `qosmio/openwrt-ipq` @ `main-nss` | 6.12 | ✅ 有 `ipq6018-nss.dtsi` | ✅ 有 | 可用，但它是 main(6.12) 不是 24.10 |
+> | `openwrt/openwrt` @ `openwrt-24.10` | 6.6 | ❌ 无 NSS | ❌ 无 | 不可用 |
+> | `immortalwrt/immortalwrt` @ `openwrt-24.10` | 6.6 | ❌ 无 NSS | ❌ 无 | 不可用 |
+>
+> **根因**：`jdcloud_re-ss-01` 是 **24.10 分支切出之后才合入 OpenWrt 主线**的，所以 24.10 全系都没有它；
+> 且 qosmio 的 `24.10-nss` 里 ipq60xx 子目标标注 `FEATURES += source-only`（不产镜像），
+> 也没有 `ipq6018-nss.dtsi`（未给 IPQ60xx 接 NSS）。
+> 结论：**AX1800 Pro 不存在「OpenWrt 24.10 + NSS + 无线」的现成源码**，请继续使用 `25.12-nss`。
+>
+> **已加保险**：编译前新增「目标机型预检」——机型不存在、或子目标为 `source-only`，
+> 会在 1 分钟内报错退出并列出该源码支持的机型，不会再出现"跑满一小时才莫名其妙失败"。
 
 ## 目录结构
 

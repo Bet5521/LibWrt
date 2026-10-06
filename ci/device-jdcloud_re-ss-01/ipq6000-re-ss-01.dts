@@ -233,10 +233,6 @@
 		opp-supported-hw = <0xf>;
 	};
 
-	opp-1200000000 {
-		opp-supported-hw = <0xf>;
-	};
-
 	opp-1320000000 {
 		opp-supported-hw = <0xf>;
 	};
@@ -245,9 +241,10 @@
 		opp-supported-hw = <0xf>;
 	};
 
-	opp-1512000000 {
-		opp-supported-hw = <0xf>;
-	};
+	/* 注：25.12(内核 6.12) 另有 opp-1200000000 / opp-1512000000，
+	 * 但 24.10(内核 6.6) 的 ipq6018.dtsi 没有这两个节点。
+	 * 若保留，dtc 会凭空造出缺 opp-hz 的残缺 OPP，
+	 * 导致 OPP 表解析失败、cpufreq 无法注册 —— 故按 6.6 实际存在的档位裁剪。 */
 
 	opp-1608000000 {
 		opp-supported-hw = <0x1>;

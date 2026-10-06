@@ -51,6 +51,20 @@ cp "$ASSETS/ipq6000-re-ss-01.dts" "$DTS_DIR/ipq6000-re-ss-01.dts"
 cp "$ASSETS/ipq6018-nss.dtsi"     "$DTS_DIR/ipq6018-nss.dtsi"
 echo "  设备树: ipq6000-re-ss-01.dts、ipq6018-nss.dtsi -> $DTS_DIR"
 
+# ---- 2.5 校正 SDHCI 节点标签（内核版本差异，写错必炸）----
+# 6.6（qosmio 24.10-nss）里 SDHCI 节点标签是 sdhc_1（由 0137 补丁添加）；
+# 6.12（LibWrt 25.12）里是 sdhc。DTC 遇到不存在的标签会直接报
+#   "Reference to non-existent node or label" 并中断编译，
+# 所以按源码里真实存在的标签名自动校正，而不是写死某一个。
+DTS_DST="$DTS_DIR/ipq6000-re-ss-01.dts"
+if grep -rqE "^\+?[[:space:]]*sdhc_1:" "$QCA"/patches-*/ "$QCA"/files/ 2>/dev/null; then
+	SDHC_LABEL="sdhc_1"
+else
+	SDHC_LABEL="sdhc"
+fi
+sed -i "s|^&sdhc[0-9_]*[[:space:]]*{|\&${SDHC_LABEL} {|" "$DTS_DST"
+echo "  SDHCI 标签按源码校正为: &${SDHC_LABEL}"
+
 # ---- 3 机型定义 ----
 # 空行隔开，避免和上一个 define 粘在一起
 printf '\n' >> "$IMG"

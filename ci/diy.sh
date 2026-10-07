@@ -14,6 +14,18 @@
 # ============================================================
 set -u
 
+# ---------------- 修复已知的内核补丁冲突 ----------------
+# qosmio 24.10-nss 自带的 NSS ECM bonding 补丁是按早期 6.6.x 写的，
+# 内核升到 6.6.141 后有 2 个 hunk 上下文漂移，打不上 → target/linux 编译失败、整条构建挂掉。
+# 这里按 6.6.141 重写这两处 hunk（不能跳过补丁：它给 bonding 注册 ECM 回调符号）。
+# 幂等：补丁已修过或上下文不符就跳过，不会二次修改。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/fix-nss-bonding-patch.py" ]; then
+	echo "===== 内核补丁冲突自检 ====="
+	python3 "$SCRIPT_DIR/fix-nss-bonding-patch.py" "$(pwd)" \
+		|| echo "::warning::补丁修复脚本执行异常，继续构建"
+fi
+
 # ---------------- 读取输入（带默认值） ----------------
 LAN_IP="${DIY_LAN_IP:-192.168.1.1}"
 LAN_NETMASK="${DIY_LAN_NETMASK:-255.255.255.0}"

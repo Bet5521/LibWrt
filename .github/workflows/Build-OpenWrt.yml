@@ -663,7 +663,7 @@ jobs:
             echo
             echo "----- 若编译步骤留下日志则附上尾部 -----"
             if [ -n "${COMPILE_LOG:-}" ] && [ -f "$COMPILE_LOG" ]; then
-              tail -n 200 "$COMPILE_LOG"
+              tail -n 800 "$COMPILE_LOG"
             fi
           } > "$LOG" 2>&1
 
@@ -672,7 +672,7 @@ jobs:
             {
               echo "## ❌ 编译失败：run #$GITHUB_RUN_NUMBER（$GITHUB_SHA）"
               echo '```text'
-              sed -r 's/\x1b\[[0-9;]*[mGKHF]//g' "$COMPILE_LOG" | tail -n 200
+              sed -r 's/\x1b\[[0-9;]*[mGKHF]//g' "$COMPILE_LOG" | tail -n 800
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY" || true
           fi
@@ -692,7 +692,7 @@ jobs:
             echo
             echo '```text'
             if [ -n "${COMPILE_LOG:-}" ] && [ -f "$COMPILE_LOG" ]; then
-              sed -r 's/\x1b\[[0-9;]*[mGKHF]//g' "$COMPILE_LOG" | tail -c 24000
+              sed -r 's/\x1b\[[0-9;]*[mGKHF]//g' "$COMPILE_LOG" | tail -c 40000
             else
               echo "(没有 compile.log：失败发生在编译步骤之前，见下方诊断信息)"
             fi

@@ -239,7 +239,13 @@ jobs:
       ccache_key: ${{ steps.vars.outputs.ccache_key }}
       staging_key: ${{ steps.vars.outputs.staging_key }}
     permissions:
-      contents: read
+      # contents:write —— 失败诊断步骤要往 diag-branch 回写日志；
+      #                   原来这里是 read，push 被拒又被 `|| true` 吞掉，
+      #                   表现为「诊断步骤 success 但诊断分支不存在」，日志全丢。
+      # issues:write   —— 双保险：把失败日志尾部贴到一个 Issue 里。
+      #                   公开仓库的 Issue 无需认证即可读，哪怕分支推送失败也能拿到报错。
+      contents: write
+      issues: write
     steps:
       # ---------- 0 检出本仓库（只拉本仓库，很小）----------
       - name: Checkout(检出本仓库)
@@ -591,9 +597,11 @@ jobs:
           echo "$(nproc) 线程编译"
           # 先并行编译（快）；失败则降级单线程 + V=s 拿到真正的报错行。
           # 两路输出都 tee 进日志，供失败诊断步骤回写。
+          # 降级单线程会非常慢（可能几小时），这里给 30 分钟上限：
+          # 超时则 pipeline 返回 124，配合 -eo pipefail 直接判定失败并进入诊断步骤。
           make -j"$(nproc)" BUILD_LOG=1 2>&1 | tee -a "$COMPILE_LOG" || {
-            echo "::warning::并行编译失败，降级 make -j1 V=s 以定位报错"
-            make -j1 V=s 2>&1 | tee -a "$COMPILE_LOG"
+            echo "::warning::并行编译失败，降级 make -j1 V=s（限时 30 分钟）以定位报错"
+            timeout 1800 make -j1 V=s 2>&1 | tee -a "$COMPILE_LOG"
           }
           echo "[compile] 结束，日志 $(wc -l < "$COMPILE_LOG" 2>/dev/null || echo '?') 行"
 
@@ -659,6 +667,53 @@ jobs:
             fi
           } > "$LOG" 2>&1
 
+          # --- 双保险 1：日志尾部写进 Job Summary（Actions 页面直接可见）---
+          if [ -n "${COMPILE_LOG:-}" ] && [ -f "$COMPILE_LOG" ]; then
+            {
+              echo "## ❌ 编译失败：run #$GITHUB_RUN_NUMBER（$GITHUB_SHA）"
+              echo '```text'
+              sed -r 's/\x1b\[[0-9;]*[mGKHF]//g' "$COMPILE_LOG" | tail -n 200
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
+          # --- 双保险 2：贴到一个 Issue（公开仓库 Issue 无需认证即可读）---
+          # 这一步的意义：外部 PAT 常常连 contents:read 都没有，拿不到 Actions 日志
+          # （REST 的 log 接口要求 admin）。Issue 走公开 REST 就能读到报错正文。
+          ISSUE_BODY="${RUNNER_TEMP}/issue-body.md"
+          {
+            echo "自动生成：Actions run \`$GITHUB_RUN_ID\` 编译失败。"
+            echo
+            echo "- 源码分支：${{ inputs.repo_branch }}"
+            echo "- 提交：$GITHUB_SHA"
+            echo "- 时间：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "## 编译日志尾部"
+            echo
+            echo '```text'
+            if [ -n "${COMPILE_LOG:-}" ] && [ -f "$COMPILE_LOG" ]; then
+              sed -r 's/\x1b\[[0-9;]*[mGKHF]//g' "$COMPILE_LOG" | tail -c 24000
+            else
+              echo "(没有 compile.log：失败发生在编译步骤之前，见下方诊断信息)"
+            fi
+            echo '```'
+            echo
+            echo "<details><summary>诊断信息</summary>"
+            echo
+            echo '```text'
+            cat "$LOG"
+            echo '```'
+            echo
+            echo "</details>"
+          } > "$ISSUE_BODY"
+
+          echo "--- 创建诊断 Issue（便于无 admin 权限读取报错）---"
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "[DIAG] build run #$GITHUB_RUN_NUMBER 编译失败（$GITHUB_SHA）" \
+            --body-file "$ISSUE_BODY" \
+            || echo "::warning::Issue 创建失败（可能未启用 Issues 或权限不足）"
+
           # 注意：编译源码在 /mnt/openwrt（$GITHUB_WORKSPACE 之外），
           # 所以这里回到 workspace（本仓库）做 orphan 分支提交，只会带上这一个日志文件。
           cd "$GITHUB_WORKSPACE"
@@ -668,7 +723,8 @@ jobs:
           git rm -rf --cached . >/dev/null 2>&1 || true
           git add -f "$LOG"
           git commit -m "diag: run #$GITHUB_RUN_NUMBER 失败诊断（$GITHUB_SHA）" || exit 0
-          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" diag-branch || true
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" diag-branch \
+            || echo "::warning::diag-branch 推送失败（请以上面 Issue 里的日志为准）"
 
   Release:
     runs-on: ubuntu-24.04

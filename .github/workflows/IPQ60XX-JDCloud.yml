@@ -121,7 +121,10 @@ permissions:
   # 必须是 write：Build 失败时要往 diag-branch 回写诊断日志，
   # Release 阶段也要建 Release / 传固件。之前写 read 导致诊断永远推不上去，
   # 失败只能靠猜（日志接口需要管理员权限，外部读不到）。
+  # issues:write —— 可复用工作流申请写权限的上限由【调用方】决定，
+  #                 这里不给，被调用方申请 issues:write 会直接 startup_failure。
   contents: write
+  issues: write
   actions: read
 
 jobs:
@@ -130,6 +133,9 @@ jobs:
     permissions:
       contents: write
       actions: write
+      # 被调用方可申请的权限上限由这里决定；少了 issues:write，
+      # Build-OpenWrt.yml 里申请 issues:write 会让整条 workflow 起不来。
+      issues: write
     with:
       # ---------- 基础 ----------
       # 24.10 基线：源码直接拉 qosmio 的 IPQ60xx NSS 分支（自带正确的 NSS/wireless feeds）

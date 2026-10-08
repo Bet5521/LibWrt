@@ -107,6 +107,10 @@ on:
         description: '要移除的包（空格或逗号分隔，可多行）'
         required: false
         default: ''
+      extra_feeds:
+        description: '自定义 feed 源（每行一个：<name> <url>[;branch]，留空=只用源码默认 feeds）'
+        required: false
+        default: ''
 
       # ==================== 发布 ====================
       make_release:
@@ -158,6 +162,8 @@ jobs:
       # ---------- 组件 ----------
       extra_packages: ${{ inputs.extra_packages || '' }}
       remove_packages: ${{ inputs.remove_packages || '' }}
+      # 自定义 feed 源：留空则只用源码自带 feeds.conf.default
+      extra_feeds: ${{ inputs.extra_feeds || '' }}
 
       # ---------- Release 说明 ----------
       release_summary: >-

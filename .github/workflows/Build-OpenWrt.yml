@@ -103,6 +103,16 @@ on:
         required: false
         type: string
         default: ''
+      # ---------- 自定义 feed 源 ----------
+      # 每行一个，格式（三种都认）：
+      #   <name> <url>[;<branch>]
+      #   src-git <name> <url>[;<branch>]
+      #   <url>[;<branch>]              # 自动从 URL 推 name
+      # 例：kenzo https://github.com/kenzok8/openwrt-packages.git;main
+      extra_feeds:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       repo_url:
@@ -213,6 +223,10 @@ on:
         description: '要移除的包（空格/逗号分隔，可多行）'
         required: false
         default: ''
+      extra_feeds:
+        description: '自定义 feed 源（每行一个：<name> <url>[;branch]，留空=只用源码默认 feeds）'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -313,6 +327,122 @@ jobs:
           cd "$OPENWRT_PATH"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+      # ---------- 3.5 自定义 feed 源（可选）----------
+      # 需求：默认只用源码自带的 feeds.conf.default，但允许在表单里追加第三方源
+      #       （kenzo / small-package / 自建源 …）。
+      #
+      # 三个必须踩对的点：
+      #  1) scripts/feeds 的读取顺序是 feeds.conf → feeds.conf.default（scripts/feeds:91）。
+      #     若 feeds.conf 不存在，追加到它上面等于没写（根本读不到）。
+      #     所以追加前先 cp feeds.conf.default feeds.conf。
+      #  2) 逐条 update，而不是 update -a：第三方源挂掉是常态，
+      #     绝不能让它把整条构建拖死 —— 单条失败就回滚那一行 + 告警，继续编译。
+      #  3) install 用 -p <name> 只装该源的包，避免和默认源里的同名包互相覆盖。
+      - name: Apply Custom Feeds(自定义 feed 源)
+        env:
+          EXTRA_FEEDS: ${{ inputs.extra_feeds }}
+        run: |
+          cd "$OPENWRT_PATH"
+
+          if [ -z "$(printf '%s' "${EXTRA_FEEDS:-}" | tr -d ' \r\n\t')" ]; then
+            echo "未指定自定义 feed 源，跳过（沿用源码自带 feeds.conf.default）"
+            exit 0
+          fi
+
+          # ---- 0) feeds.conf 必须存在，否则 scripts/feeds 回退读 .default，追加无效 ----
+          if [ ! -f feeds.conf ]; then
+            if [ -f feeds.conf.default ]; then
+              cp feeds.conf.default feeds.conf
+              echo "[feeds] 已由 feeds.conf.default 生成 feeds.conf"
+            else
+              : > feeds.conf
+              echo "::warning::源码既无 feeds.conf 也无 feeds.conf.default，新建空 feeds.conf"
+            fi
+          fi
+
+          # ---- 1) 归一化：一行一条，去 CR / 首尾空白 / 空行 / 注释 ----
+          norm_feeds() {
+            printf '%s\n' "${EXTRA_FEEDS:-}" \
+              | tr -d '\r' \
+              | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+              | sed '/^$/d' \
+              | sed '/^#/d'
+          }
+
+          ADDED=""
+          FAILED=""
+
+          # 去重：同名源被用户写了两遍时，只记一次，避免重复 install
+          add_name() {
+            case " $ADDED " in
+              *" $1 "*) ;;
+              *) ADDED="$ADDED $1" ;;
+            esac
+          }
+
+          while IFS= read -r raw; do
+            [ -n "$raw" ] || continue
+
+            line="$raw"
+            # 剥掉可选前缀，统一成 "<name> <url>"
+            case "$line" in
+              src-git-full\ *|src-git\ *|src-link\ *|src\ *)
+                line="$(printf '%s' "$line" | sed 's/^src-[a-z-]*[[:space:]]*//')" ;;
+            esac
+
+            name="$(printf '%s' "$line" | awk '{print $1}')"
+            url="$(printf '%s' "$line" | awk '{print $2}')"
+
+            # 只写了一个字段 → 当 URL，name 从 URL 推（与 scripts/feeds 的补全思路一致）
+            if [ -z "$url" ]; then
+              url="$name"
+              name="$(printf '%s' "$url" | sed 's/;.*$//' | sed 's#^.*/##; s/\.git$//' \
+                | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')"
+            fi
+
+            if [ -z "$name" ] || [ -z "$url" ]; then
+              echo "::warning::feed 行无法解析（需要 <name> <url>），已跳过: $raw"
+              continue
+            fi
+
+            # 同名源：先删旧行，避免 feeds.conf 里出现两个同名 feed
+            if grep -qE "^src-[a-z-]+[[:space:]]+${name}([[:space:]]|$)" feeds.conf; then
+              echo "[feeds] 已有同名源，按新地址覆盖: $name"
+              sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" feeds.conf
+            fi
+
+            echo "src-git ${name} ${url}" >> feeds.conf
+            echo "[feeds] + ${name} → ${url}"
+
+            # ---- 2) 单条 update，失败即回滚 ----
+            if ./scripts/feeds update "$name" > "/tmp/feeds_up_${name}.log" 2>&1; then
+              echo "[feeds] [OK] update: $name"
+              add_name "$name"
+            else
+              echo "::warning::自定义 feed 源不可用，已回滚并从构建中剔除: ${name} ${url}"
+              tail -n 20 "/tmp/feeds_up_${name}.log" 2>/dev/null || true
+              sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" feeds.conf
+              FAILED="${FAILED} ${name}"
+            fi
+          done <<< "$(norm_feeds)"
+
+          # ---- 3) 安装成功源的包 ----
+          for name in $ADDED; do
+            if ./scripts/feeds install -a -p "$name" > "/tmp/feeds_in_${name}.log" 2>&1; then
+              echo "[feeds] [OK] install: $name"
+            else
+              echo "::warning::来源 ${name} 的包安装存在失败项（多为个别包依赖缺失），继续构建"
+              grep -iE "warn|fail|error|not found|skip" "/tmp/feeds_in_${name}.log" 2>/dev/null | tail -n 15 || true
+            fi
+          done
+
+          # ---- 4) 汇总（日志里一眼能看到最终用了哪几个源）----
+          echo "--- 自定义 feed 汇总 ---"
+          echo "生效:${ADDED:- （无）}"
+          echo "失败:${FAILED:- （无）}"
+          echo "--- 当前 feeds.conf ---"
+          cat feeds.conf
 
       # ---------- 4 生成变量（缓存 key / 产物名）----------
       - name: Generate Variables(生成变量)

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LibWrt 云编译 · 京东云 AX1800 Pro</title>
+<meta name="description" content="在浏览器里勾选功能、自定义 feed 源，一键触发 GitHub Actions 编译京东云 AX1800 Pro（IPQ6000 / NSS）固件。" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="topbar">
+  <button class="topbar-btn" id="btn-theme" title="切换主题">🌙</button>
+  <a class="topbar-btn" id="btn-repo" href="https://github.com/Bet5521/LibWrt" target="_blank" rel="noopener" title="打开仓库">📦 LibWrt</a>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <h1>🚀 LibWrt 云编译</h1>
+    <p class="hero-sub">
+      京东云 AX1800 Pro 亚瑟（<code>jdcloud_re-ss-01</code> / IPQ6000）· 勾选功能 + 自定义 feed 源 → 一键触发 GitHub Actions 出固件
+    </p>
+    <div class="hero-tags">
+      <span class="tag">OpenWrt 24.10 基线</span>
+      <span class="tag">满血 NSS 加速</span>
+      <span class="tag">ath11k 双频无线</span>
+      <span class="tag">自定义 feed 校验</span>
+    </div>
+  </header>
+
+  <!-- ============ 1 连接 ============ -->
+  <section class="card">
+    <h2><span class="step">1</span>连接你的仓库</h2>
+
+    <details class="guide" id="guide">
+      <summary>第一次用？点开看操作步骤</summary>
+      <ol class="guide-list">
+        <li>本页默认指向 <code>Bet5521/LibWrt</code>（本项目仓库），无需 Fork 也能用。</li>
+        <li>如果你有自己的 fork：把仓库地址改成 <code>你的用户名/LibWrt</code> 即可。</li>
+        <li>
+          生成 Token：<a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=LibWrt-Cloud-Build" target="_blank" rel="noopener">经典 Token（勾选 repo + workflow）↗</a>
+          或 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">细粒度 Token（需 Actions: Read and write）↗</a>
+        </li>
+        <li>把 Token 填到下面 → 点「验证连接」→ 看到绿色对勾就能开始编译。</li>
+        <li>Token 只存在你自己浏览器的 localStorage，本页不联网上传、不经任何中转服务器。</li>
+      </ol>
+    </details>
+
+    <div class="grid">
+      <label class="field">
+        <span class="field-label">GitHub 仓库</span>
+        <input type="text" id="in-repo" value="Bet5521/LibWrt" spellcheck="false" autocomplete="off" />
+        <span class="field-hint">格式：<code>用户名/仓库名</code></span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">
+          Personal Access Token
+          <a class="mini-link" href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=LibWrt-Cloud-Build" target="_blank" rel="noopener">去生成 ↗</a>
+        </span>
+        <span class="row">
+          <input type="password" id="in-token" placeholder="ghp_… / github_pat_…" spellcheck="false" autocomplete="off" />
+          <button class="btn ghost" id="btn-eye" type="button">显示</button>
+        </span>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="btn-verify" type="button">验证连接</button>
+      <label class="check-inline">
+        <input type="checkbox" id="in-remember" checked />
+        <span>记住 Token（仅本机浏览器）</span>
+      </label>
+    </div>
+
+    <div class="status" id="st-conn"></div>
+  </section>
+
+  <!-- ============ 2 目标 ============ -->
+  <section class="card">
+    <h2><span class="step">2</span>编译目标</h2>
+
+    <div class="grid">
+      <label class="field">
+        <span class="field-label">编译分支</span>
+        <select id="in-line"></select>
+        <span class="field-hint" id="hint-line"></span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">固件档位</span>
+        <select id="in-config"></select>
+        <span class="field-hint" id="hint-config"></span>
+      </label>
+    </div>
+
+    <div class="device-card">
+      <div class="device-head">
+        <span class="device-icon">📡</span>
+        <div>
+          <div class="device-name">京东云 AX1800 Pro 亚瑟 <span class="chip-mini ok">已适配</span></div>
+          <div class="device-meta">
+            机型 <code>jdcloud_re-ss-01</code> · 平台 <code>qualcommax/ipq60xx</code> · IPQ6000 四核 A53 · 512MB RAM · NAND rootfs（mmcblk0p18）
+          </div>
+        </div>
+      </div>
+      <div class="device-foot" id="device-foot"></div>
+    </div>
+  </section>
+
+  <!-- ============ 3 功能 ============ -->
+  <section class="card">
+    <h2>
+      <span class="step">3</span>功能组件
+      <span class="count" id="cnt-pkg"></span>
+    </h2>
+
+    <div class="toolbar">
+      <input type="search" id="in-search" placeholder="🔍 搜索包名 / 中文说明…" autocomplete="off" />
+      <button class="btn ghost" id="btn-clear" type="button">清空勾选</button>
+      <button class="btn ghost" id="btn-check-pkgs" type="button" title="逐包去 feed 仓库确认真实存在">校验所选包</button>
+    </div>
+
+    <div class="legend">
+      <span class="chip-mini ok">默认 feed</span> 源码自带源里通常有
+      <span class="chip-mini nss">NSS 源</span> qosmio NSS 专用源
+      <span class="chip-mini third">需第三方源</span> 默认没有，要先在下方第 4 步加 feed
+    </div>
+
+    <div id="cats"></div>
+
+    <label class="field block">
+      <span class="field-label">额外包名（空格或逗号分隔，与上面勾选合并）</span>
+      <textarea id="in-custom" rows="2" placeholder="例如：luci-app-ttyd htop kmod-tcp-bbr"></textarea>
+    </label>
+
+    <label class="field block">
+      <span class="field-label">移除包名（可选，用于关掉档位里的某些包）</span>
+      <textarea id="in-remove" rows="2" placeholder="例如：luci-app-argon-config"></textarea>
+    </label>
+
+    <div class="summary-line">
+      <span class="summary-label">最终加入：</span>
+      <code id="out-pkgs">—</code>
+      <button class="btn ghost tiny" id="btn-copy-pkgs" type="button" hidden>复制</button>
+    </div>
+    <div class="status" id="st-pkgs"></div>
+  </section>
+
+  <!-- ============ 4 feeds ============ -->
+  <section class="card">
+    <h2><span class="step">4</span>Feed 源</h2>
+
+    <div class="split">
+      <div class="subcard">
+        <div class="subcard-head">
+          <h3>默认 feed（来自源码仓库配置）</h3>
+          <button class="btn ghost tiny" id="btn-reload-feeds" type="button">重新读取</button>
+        </div>
+        <p class="subcard-note" id="feeds-note">正在读取源码仓库的 <code>feeds.conf.default</code>…</p>
+        <div class="feed-list" id="feeds-default"></div>
+      </div>
+
+      <div class="subcard">
+        <div class="subcard-head">
+          <h3>自定义 feed 源</h3>
+          <span class="count" id="cnt-feed"></span>
+        </div>
+        <p class="subcard-note">
+          添加后会立刻自动校验：仓库是否存在、分支是否匹配当前编译线、是否含内核模块（kmod）等，并给出可选建议。
+        </p>
+
+        <div class="feed-form">
+          <input type="text" id="in-feed-url" placeholder="地址：owner/repo 或 https://github.com/owner/repo.git" spellcheck="false" autocomplete="off" />
+          <input type="text" id="in-feed-name" placeholder="名称（可选，留空自动推导）" spellcheck="false" autocomplete="off" />
+          <input type="text" id="in-feed-branch" placeholder="分支（可选，留空=用仓库默认分支）" spellcheck="false" autocomplete="off" />
+          <button class="btn primary" id="btn-add-feed" type="button">添加并校验</button>
+        </div>
+
+        <div class="feed-list" id="feeds-custom"></div>
+        <div class="status" id="st-feed"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5 系统 ============ -->
+  <section class="card">
+    <h2><span class="step">5</span>系统与无线初始设置 <span class="opt">可选</span></h2>
+
+    <div class="grid">
+      <label class="field">
+        <span class="field-label">LAN 管理地址</span>
+        <input type="text" id="in-lanip" placeholder="192.168.10.1" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">LAN 子网掩码</span>
+        <input type="text" id="in-netmask" placeholder="255.255.255.0" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">上游 DNS（路由器转发用）</span>
+        <input type="text" id="in-dns" placeholder="223.5.5.5" spellcheck="false" />
+        <span class="field-hint">同时会通过 DHCP 下发给客户端，<code>ipconfig /all</code> 里能看到</span>
+      </label>
+      <label class="field">
+        <span class="field-label">主机名</span>
+        <input type="text" id="in-hostname" placeholder="JDC-AX1800Pro" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">时区</span>
+        <input type="text" id="in-tz" placeholder="Asia/Shanghai" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">root / LuCI 密码</span>
+        <input type="text" id="in-rootpw" placeholder="留空 = 无密码" spellcheck="false" autocomplete="off" />
+      </label>
+    </div>
+
+    <hr class="hr" />
+
+    <div class="grid">
+      <label class="field">
+        <span class="field-label">无线初始状态</span>
+        <select id="in-wifion">
+          <option value="on">on · 开机即启用</option>
+          <option value="off">off · 开机不启用</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">WiFi 名称（SSID）</span>
+        <input type="text" id="in-ssid" placeholder="JDC-AX1800Pro" spellcheck="false" />
+        <span class="field-hint">5G 会自动加 <code>_5G</code> 后缀</span>
+      </label>
+      <label class="field">
+        <span class="field-label">WiFi 密码</span>
+        <input type="text" id="in-wifipw" placeholder="至少 8 位" spellcheck="false" autocomplete="off" />
+      </label>
+      <label class="field">
+        <span class="field-label">国家码</span>
+        <input type="text" id="in-country" placeholder="CN" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">2.4G 信道</span>
+        <input type="text" id="in-ch2g" placeholder="6" spellcheck="false" />
+      </label>
+      <label class="field">
+        <span class="field-label">2.4G 频宽</span>
+        <select id="in-ht2g">
+          <option>HE20</option><option>HE40</option><option>HT20</option><option>HT40</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">5G 信道</span>
+        <input type="text" id="in-ch5g" placeholder="36" spellcheck="false" />
+        <span class="field-hint">36-48 / 149-165 为非 DFS 频段</span>
+      </label>
+      <label class="field">
+        <span class="field-label">5G 频宽</span>
+        <select id="in-ht5g">
+          <option>HE80</option><option>HE160</option><option>HE40</option><option>VHT80</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <!-- ============ 6 触发 ============ -->
+  <section class="card">
+    <h2><span class="step">6</span>确认并编译</h2>
+
+    <div class="review" id="review"></div>
+
+    <label class="check-inline big">
+      <input type="checkbox" id="in-release" checked />
+      <span>编译成功后自动发布 Release（可在仓库 Releases 页下载）</span>
+    </label>
+
+    <div class="actions">
+      <button class="btn build" id="btn-build" type="button" disabled>🚀 触发云端编译</button>
+      <button class="btn ghost" id="btn-export" type="button">导出参数 JSON</button>
+      <button class="btn ghost" id="btn-copy-inputs" type="button">复制手动填写用参数</button>
+    </div>
+
+    <div class="status" id="st-build"></div>
+    <p class="foot-note">
+      编译约 1~2 小时（有缓存时更快）。成功后固件出现在
+      <a id="lnk-releases" href="https://github.com/Bet5521/LibWrt/releases" target="_blank" rel="noopener">Releases ↗</a>；
+      失败时构建会把报错日志回写到 <code>diag-branch</code> 分支，可直接查看原因。
+    </p>
+  </section>
+
+  <footer class="foot">
+    <p>
+      基于 <a href="https://github.com/Bet5521/LibWrt" target="_blank" rel="noopener">LibWrt</a> ·
+      源码 <a href="https://github.com/qosmio/openwrt-ipq" target="_blank" rel="noopener">qosmio/openwrt-ipq</a> ·
+      全部编译在 GitHub Actions 上完成 · Token 仅存于你的浏览器
+    </p>
+  </footer>
+
+</div>
+
+<script src="catalog.js"></script>
+<script src="feedcheck.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -6,14 +6,60 @@
 >
 > 所有固件均带 **NSS 满血卸载**（有线 datapath 走 NSS），默认 LAN `192.168.10.1`、无线开机启用。
 
+## 🌐 网页版云编译（勾选功能 + 自定义 feed 校验）
+
+不想在 Actions 表单里逐项手填，用网页版：**https://bet5521.github.io/LibWrt/**
+
+- **功能勾选**：111 个包按 14 个分类列出，每项标了来源（默认 feed / NSS 源 / 需第三方源），
+  支持搜索、自定义包名、移除包名；还有「校验所选包」——按当前编译线去 feed 仓库逐个确认是否真实存在
+- **编译分支可切** `24.10-nss` / `25.12-nss`，页面显示该线的源码仓库、内核版本、默认 feeds 来源
+- **Feed 源管理**（本次新增的重点）：
+  - 默认 feeds **直接从源码仓库的 `feeds.conf.default` 读取展示**（切分支会自动重新读取）
+  - 添加自定义源后**立即自动校验**，逐条给出结论与建议：
+    | 校验项 | 判定与建议 |
+    |---|---|
+    | 仓库是否存在 / 可访问 | 404 → 明确报错（私有仓库需 Token 有读权限） |
+    | 分支是否存在 | 不存在 → 给出**最接近的分支**，可一键切换 |
+    | **版本是否匹配** | 分支 `openwrt-23.05` 对 24.10 线 → 警告 + 建议改 `openwrt-24.10` |
+    | **是否含内核模块** | 检出 `kmod-*` / `target/` → 提示内核绑定风险（预编译闭源驱动跨内核必失效） |
+    | 是否真的是 feed | 误把完整源码树填进来 → 直接判不可用 |
+    | 非 GitHub 源 | gitee / git.openwrt.org 等无法预校验，说明会交由编译时验证 |
+- **一键触发** `IPQ60XX-JDCloud-AX1800Pro`；也可导出参数 JSON / 复制参数去 Actions 手动填
+
+### 开启网页（一次性）
+
+仓库 **Settings → Pages → Build and deployment → Source** 选 **`GitHub Actions`** → 保存一次即可。
+之后改 `docs/` 下的文件并推送，会自动重新部署（见 `.github/workflows/Pages.yml`）。
+
+> 从别人仓库 fork 过来时，Pages 设置**不会**继承上游，必须在本仓库手动开一次；
+> 若 Actions 被禁用，还要在 Actions 页面点一次「I understand my workflows, go ahead and enable them」。
+
+### 网页用什么 Token
+
+触发 workflow 需要 Token：
+- **细粒度 Token**：该仓库的 `Actions: Read and write` + `Contents: Read`
+- **经典 Token**：勾 `repo`（只改工作流文件才额外需要 `workflow`）
+
+Token 只存浏览器 localStorage，页面**直连 `api.github.com`**，不经任何中转服务器。
+不想用 Token 也行：页面能导出参数 JSON / 复制参数，拿去 Actions 表单手动填，效果一样。
+
+> 页面的 feed 校验是**编译前**的静态判断；真正能不能用，最终由编译时的
+> `./scripts/feeds update <name>` 决定 —— 单条失败会被**自动回滚并跳过**，不会拖垮整条构建。
+
 ## 目录结构
 
 ```
 .github/workflows/Build-OpenWrt.yml      # workflow_call 公共模板（Build / Release / Cleanup 三 job）
 .github/workflows/IPQ60XX-JDCloud.yml    # 亚瑟入口（手动表单 + push + 每周一 cron）
 .github/workflows/Cleanup-Build-Info.yml # 一键清空 Release/Tag/运行记录/产物/缓存（手动触发）
-configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包）
-configs/IPQ60XX-minimal.config           # 极简档位（52 包，默认档）
+.github/workflows/Pages.yml              # 发布 docs/ 里的网页版编译页面
+docs/index.html                          # 网页版编译页面（GitHub Pages 静态站点）
+docs/style.css                           # 页面样式（亮/暗主题）
+docs/catalog.js                          # 功能组件目录 + 编译线元数据
+docs/feedcheck.js                        # GitHub API 封装 + feed 源校验 + 包名存在性校验
+docs/app.js                              # 页面主逻辑（勾选 / 校验 / 触发编译）
+configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包，默认档）
+configs/IPQ60XX-minimal.config           # 极简档位（52 包）
 configs/IPQ60XX-full.config              # 全功能档位（115 包）
 configs/NoWiFi.config                    # 无无线档位（65 包）
 configs/_gen_profiles.py                 # 由基准档自动派生三个档位（防止漂移）
@@ -66,11 +112,11 @@ Actions → **Cleanup Build Info** → Run workflow，会删掉
 Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓存 / `diag-branch`。
 （外部 PAT 常是只读的删不动这些，所以这个 workflow 用的是 Actions 自己的 `GITHUB_TOKEN`。）
 
-### 可自定义项（18 项表单）
+### 可自定义项（19 项表单）
 
 | 分组 | 表单项 | 默认值 |
 | --- | --- | --- |
-| 档位 | `config_file`（下拉，**默认极简**） | `IPQ60XX-minimal` / `IPQ60XX` / `IPQ60XX-full` / `NoWiFi` |
+| 档位 | `config_file`（下拉，**默认标准档**） | `IPQ60XX` / `IPQ60XX-minimal` / `IPQ60XX-full` / `NoWiFi` |
 | LAN | `lan_ip` / `lan_netmask` / `lan_dns` | `192.168.10.1` / `255.255.255.0` / `223.5.5.5` |
 | 系统 | `hostname` / `timezone` / `root_password` | `JDC-AX1800Pro` / `Asia/Shanghai` / 空（无密码） |
 | 无线 | `wifi_enabled`（on/off） | `on` |
@@ -78,8 +124,31 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 | 无线 | `wifi_channel_2g` / `wifi_htmode_2g` | `6` / `HE20` |
 | 无线 | `wifi_channel_5g` / `wifi_htmode_5g` | `36` / `HE80` |
 | 组件 | `extra_packages` / `remove_packages` | 空（空格/逗号/换行分隔，可多行） |
+| Feed | `extra_feeds` | 空（每行一个 `<name> <url>[;branch]`，留空＝只用源码默认 feeds） |
 
 `wifi_enabled = off` 时：无线不启用，但配置保留，之后可在 LuCI 里一键打开。
+
+### `extra_feeds` 自定义 feed 源
+
+每行一个，三种写法都认（支持多行，`#` 开头的行为注释）：
+
+```
+kenzo https://github.com/kenzok8/openwrt-packages.git;main
+src-git small https://github.com/kenzok8/small-package.git;main
+https://github.com/foo/bar.git;openwrt-25.12        # 不写名字，从 URL 自动推导
+```
+
+编译时的行为（`Build-OpenWrt.yml` 的「Apply Custom Feeds」步骤）：
+
+| 情况 | 处理 |
+| --- | --- |
+| 未填 | 直接跳过，沿用源码自带 `feeds.conf.default` |
+| 正常 | 先把 `feeds.conf.default` 复制成 `feeds.conf`（**必须**，否则 `scripts/feeds` 只读 `.default`，追加的行等于没写），再逐条追加 |
+| 某条源 `update` 失败 | **只告警 + 回滚那一行**，其余源与整条构建继续跑 |
+| 同名源写了两次 | 后者覆盖前者，`feeds.conf` 里只留一行 |
+| 装包有失败项 | 告警并列出，不中断 |
+
+> 用网页版（第 4 步）添加自定义源，会在提交前就帮你把这些坑提前判掉。
 
 ### 设置是怎么生效的
 

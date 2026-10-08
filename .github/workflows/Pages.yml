@@ -1,0 +1,56 @@
+# =============================================================
+#  GitHub Pages —— 发布 docs/ 里的「自定义编译」网页
+#
+#  首次使用前需要一次性开启：
+#    仓库 Settings → Pages → Build and deployment → Source 选
+#    「GitHub Actions」→ 保存。
+#    （本工作流里的 configure-pages 已带 enablement: true 尝试自动开启，
+#      但该接口需要仓库管理员权限；若自动开启失败，手动开一次即可。）
+#
+#  之后只要改 docs/ 下的文件并推送，页面就会自动重新部署。
+#  访问地址：https://<用户名>.github.io/<仓库名>/
+# =============================================================
+name: Pages 部署
+
+on:
+  push:
+    branches: [24.10-nss, 25.12-nss]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/Pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 部署网页
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout(检出仓库)
+        uses: actions/checkout@v4
+
+      - name: Setup Pages(配置 Pages)
+        uses: actions/configure-pages@v5
+        with:
+          # 尝试自动开启 Pages；失败不影响后续步骤，只需手动开启一次
+          enablement: true
+
+      - name: Upload docs(上传网页目录)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs
+
+      - name: Deploy(部署)
+        id: deploy
+        uses: actions/deploy-pages@v4

@@ -40,6 +40,9 @@ MINIMAL_DROP = [
     "kmod-sched-cake", "sqm-scripts-nss",
     "luci-app-sqm", "luci-app-upnp", "luci-app-wol",
     "luci-app-package-manager", "ttyd", "logrotate",
+    # lucky（DDNS / 端口转发，来自第三方 feed feeds.conf.default 的预置区）
+    # 极简档不带：它属于「便利型第三方应用」，且要额外拉一个 feed。
+    "lucky", "luci-app-lucky", "luci-i18n-lucky-zh-cn",
     # 上面那些 LuCI 应用配套的翻译包，一并去掉
     "luci-i18n-sqm-zh-cn", "luci-i18n-upnp-zh-cn",
 ]
@@ -186,7 +189,7 @@ def main():
     minimal = swap_header(
         minimal,
         "京东云 AX1800 Pro 亚瑟（jdcloud_re-ss-01）—— 极简满血 NSS",
-        ["去掉 SQM/UPnP/WoL/ttyd/htop/watchdog/logrotate 等便利组件，",
+        ["去掉 SQM/UPnP/WoL/ttyd/htop/logrotate/lucky 等便利组件，",
          "保留 NSS 满血卸载 + ath11k 无线 + dnsmasq-full + firewall4 + 基础 LuCI。"])
     write("IPQ60XX-minimal.config", minimal)
 

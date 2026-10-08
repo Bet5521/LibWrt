@@ -339,29 +339,100 @@ jobs:
       #  2) 逐条 update，而不是 update -a：第三方源挂掉是常态，
       #     绝不能让它把整条构建拖死 —— 单条失败就回滚那一行 + 告警，继续编译。
       #  3) install 用 -p <name> 只装该源的包，避免和默认源里的同名包互相覆盖。
-      - name: Apply Custom Feeds(自定义 feed 源)
+      - name: Apply Feeds(应用 feed 源：仓库预置 + 表单自定义)
         env:
           EXTRA_FEEDS: ${{ inputs.extra_feeds }}
         run: |
           cd "$OPENWRT_PATH"
-
-          if [ -z "$(printf '%s' "${EXTRA_FEEDS:-}" | tr -d ' \r\n\t')" ]; then
-            echo "未指定自定义 feed 源，跳过（沿用源码自带 feeds.conf.default）"
-            exit 0
-          fi
-
-          # ---- 0) feeds.conf 必须存在，否则 scripts/feeds 回退读 .default，追加无效 ----
-          if [ ! -f feeds.conf ]; then
-            if [ -f feeds.conf.default ]; then
-              cp feeds.conf.default feeds.conf
+    
+          CONF="feeds.conf"
+          DEFAULT="feeds.conf.default"
+          # 仓库预置 feed 就写在 CI 仓库自己的 feeds.conf.default 里（已 checkout 到工作区）
+          PRESET="$GITHUB_WORKSPACE/feeds.conf.default"
+    
+          ADDED=""
+          FAILED=""
+    
+          # feeds.conf 不存在时补上：scripts/feeds 只读 feeds.conf，
+          # 缺文件才会回退读 feeds.conf.default —— 追加到不存在的文件等于没写。
+          ensure_conf() {
+            [ -f "$CONF" ] && return 0
+            if [ -f "$DEFAULT" ]; then
+              cp "$DEFAULT" "$CONF"
               echo "[feeds] 已由 feeds.conf.default 生成 feeds.conf"
             else
-              : > feeds.conf
+              : > "$CONF"
               echo "::warning::源码既无 feeds.conf 也无 feeds.conf.default，新建空 feeds.conf"
             fi
+          }
+    
+          # 按 feed 名判断是否已存在（优先看 feeds.conf，没有该文件就看 feeds.conf.default，
+          # 因为那正是 scripts/feeds 的回退读法）。$1 是已转义的 name 正则片段。
+          feed_exists() {
+            local f="$CONF"
+            [ -f "$f" ] || f="$DEFAULT"
+            [ -f "$f" ] || return 1
+            grep -qE "^src-[a-z-]+[[:space:]]+$1([[:space:]]|$)" "$f"
+          }
+    
+          # grep -E 里只有 . 是元字符（名字已被限制在 [A-Za-z0-9._-] 内）
+          re_escape() { printf '%s' "$1" | sed 's/\./\\./g'; }
+    
+          # 去重：同一个源被处理多次时只记一次，避免重复 install
+          add_name() {
+            case " $ADDED " in
+              *" $1 "*) ;;
+              *) ADDED="$ADDED $1" ;;
+            esac
+          }
+    
+          # 追加一个 feed：update 失败即回滚那一行；install 失败只告警
+          # $1=name  $2=url(可带 ;branch)  $3=来源描述
+          add_feed() {
+            local name="$1" url="$2" origin="$3"
+            ensure_conf
+            printf 'src-git %s %s\n' "$name" "$url" >> "$CONF"
+            echo "[feeds] + ${name} ← ${url}   （来源：${origin}）"
+            if ./scripts/feeds update "$name" > "/tmp/feeds_up_${name}.log" 2>&1; then
+              echo "[feeds] [OK] update: ${name}"
+              if ./scripts/feeds install -a -p "$name" > "/tmp/feeds_in_${name}.log" 2>&1; then
+                echo "[feeds] [OK] install: ${name}"
+              else
+                echo "::warning::来源 ${name} 的包安装存在失败项（多为个别包依赖缺失），继续构建"
+                grep -iE "warn|fail|error|not found|skip" "/tmp/feeds_in_${name}.log" 2>/dev/null | tail -n 15 || true
+              fi
+              add_name "$name"
+            else
+              echo "::warning::feed 源不可用，已回滚并从构建中剔除: ${name} ${url}"
+              tail -n 20 "/tmp/feeds_up_${name}.log" 2>/dev/null || true
+              sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" "$CONF"
+              FAILED="${FAILED} ${name}"
+            fi
+          }
+    
+          # ---------- A) 仓库预置 feed：只补源码里没有的（按名，绝不覆盖）----------
+          if [ -f "$PRESET" ]; then
+            echo "--- A) 仓库预置 feed（取自 ${PRESET}）---"
+            while IFS= read -r raw; do
+              pline="$(printf '%s' "$raw" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+              pname="$(printf '%s' "$pline" | awk '{print $2}')"
+              purl="$(printf '%s' "$pline" | awk '{print $3}')"
+              [ -n "$pname" ] && [ -n "$purl" ] || continue
+              case "$pname" in
+                */*) echo "::warning::预置 feed 名含 /，已跳过: ${pname}"; continue ;;
+              esac
+              if feed_exists "$(re_escape "$pname")"; then
+                echo "[preset] 源码已自带 feed「${pname}」，保持源码版本不动"
+                continue
+              fi
+              add_feed "$pname" "$purl" "本仓库 feeds.conf.default"
+            done < <(awk '/^# *>>> *repo-extra-feeds/{f=1;next} /^# *<<< *repo-extra-feeds/{f=0} f' "$PRESET" \
+                     | grep -E '^[[:space:]]*src-')
+          else
+            echo "::notice::未找到 ${PRESET}，跳过仓库预置 feed"
           fi
-
-          # ---- 1) 归一化：一行一条，去 CR / 首尾空白 / 空行 / 注释 ----
+    
+          # ---------- B) 表单自定义源：同名可覆盖 ----------
           norm_feeds() {
             printf '%s\n' "${EXTRA_FEEDS:-}" \
               | tr -d '\r' \
@@ -369,98 +440,76 @@ jobs:
               | sed '/^$/d' \
               | sed '/^#/d'
           }
-
-          ADDED=""
-          FAILED=""
-
-          # 去重：同名源被用户写了两遍时，只记一次，避免重复 install
-          add_name() {
-            case " $ADDED " in
-              *" $1 "*) ;;
-              *) ADDED="$ADDED $1" ;;
-            esac
-          }
-
-          while IFS= read -r raw; do
-            [ -n "$raw" ] || continue
-
-            line="$raw"
-            # 剥掉可选前缀，统一成 "<name> <url>"
-            case "$line" in
-              src-git-full\ *|src-git\ *|src-link\ *|src\ *)
-                line="$(printf '%s' "$line" | sed 's/^src-[a-z-]*[[:space:]]*//')" ;;
-            esac
-
-            name="$(printf '%s' "$line" | awk '{print $1}')"
-            url="$(printf '%s' "$line" | awk '{print $2}')"
-
-            # 只写了一个字段 → 当 URL，name 从 URL 推（与 scripts/feeds 的补全思路一致）
-            if [ -z "$url" ]; then
-              url="$name"
-              name="$(printf '%s' "$url" | sed 's/;.*$//' | sed 's#^.*/##; s/\.git$//' \
-                | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')"
-            fi
-
-            # name 会拼进 /tmp/<name>.log 的路径，也会进 sed/grep 表达式，
-            # 所以先滤掉不安全字符（name 里带 / 会直接写坏 sed 命令、写坏日志路径）
-            safe_name="$(printf '%s' "$name" | sed 's/[^A-Za-z0-9._-]/-/g')"
-            if [ "$safe_name" != "$name" ]; then
-              echo "::warning::feed 名含不安全字符，已改写为「${safe_name}」（原名：${name}）"
-              name="$safe_name"
-            fi
-
-            if [ -z "$name" ] || [ -z "$url" ]; then
-              echo "::warning::feed 行无法解析（需要 <name> <url>），已跳过: $raw"
-              continue
-            fi
-
-            # 同名源：先删旧行，避免 feeds.conf 里出现两个同名 feed。
-            # sed 用 / 作分隔符（name 已不含 /）；grep -E 里只剩 . 是元字符，单独转义
-            name_re="$(printf '%s' "$name" | sed 's/\./\\./g')"
-            if grep -qE "^src-[a-z-]+[[:space:]]+${name_re}([[:space:]]|$)" feeds.conf; then
-              # 覆盖源码自带的 feed 影响面很大（例如把 packages 换成第三方源），必须显式告警
-              if [ -f feeds.conf.default ] && \
-                 grep -qE "^src-[a-z-]+[[:space:]]+${name_re}([[:space:]]|$)" feeds.conf.default; then
-                echo "::warning::正在覆盖源码自带 feed「${name}」——这会替换掉源码的默认源，可能导致编译失败: ${url}"
-              else
-                echo "[feeds] 已有同名源，按新地址覆盖: $name"
+    
+          if [ -z "$(norm_feeds | tr -d ' \r\n\t')" ]; then
+            echo "[feeds] B) 表单未指定自定义 feed 源（extra_feeds 为空），跳过"
+          else
+            echo "--- B) 表单自定义 feed 源 ---"
+            while IFS= read -r raw; do
+              [ -n "$raw" ] || continue
+    
+              line="$raw"
+              # 剥掉可选前缀，统一成 "<name> <url>"
+              case "$line" in
+                src-git-full\ *|src-git\ *|src-link\ *|src\ *)
+                  line="$(printf '%s' "$line" | sed 's/^src-[a-z-]*[[:space:]]*//')" ;;
+              esac
+    
+              name="$(printf '%s' "$line" | awk '{print $1}')"
+              url="$(printf '%s' "$line" | awk '{print $2}')"
+    
+              # 只写了一个字段 → 当 URL，name 从 URL 推（与 scripts/feeds 的补全思路一致）
+              if [ -z "$url" ]; then
+                url="$name"
+                name="$(printf '%s' "$url" | sed 's/;.*$//' | sed 's#^.*/##; s/\.git$//' \
+                  | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')"
               fi
-              sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" feeds.conf
-            fi
-
-            echo "src-git ${name} ${url}" >> feeds.conf
-            echo "[feeds] + ${name} → ${url}"
-
-            # ---- 2) 单条 update，失败即回滚 ----
-            if ./scripts/feeds update "$name" > "/tmp/feeds_up_${name}.log" 2>&1; then
-              echo "[feeds] [OK] update: $name"
-              add_name "$name"
-            else
-              echo "::warning::自定义 feed 源不可用，已回滚并从构建中剔除: ${name} ${url}"
-              tail -n 20 "/tmp/feeds_up_${name}.log" 2>/dev/null || true
-              sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" feeds.conf
-              FAILED="${FAILED} ${name}"
-            fi
-          done <<< "$(norm_feeds)"
-
-          # ---- 3) 安装成功源的包 ----
-          for name in $ADDED; do
-            if ./scripts/feeds install -a -p "$name" > "/tmp/feeds_in_${name}.log" 2>&1; then
-              echo "[feeds] [OK] install: $name"
-            else
-              echo "::warning::来源 ${name} 的包安装存在失败项（多为个别包依赖缺失），继续构建"
-              grep -iE "warn|fail|error|not found|skip" "/tmp/feeds_in_${name}.log" 2>/dev/null | tail -n 15 || true
-            fi
-          done
-
-          # ---- 4) 汇总（日志里一眼能看到最终用了哪几个源）----
-          echo "--- 自定义 feed 汇总 ---"
+    
+              # name 会拼进 /tmp/<name>.log 的路径，也会进 sed/grep 表达式，
+              # 所以先滤掉不安全字符（name 里带 / 会直接写坏 sed 命令、写坏日志路径）
+              safe_name="$(printf '%s' "$name" | sed 's/[^A-Za-z0-9._-]/-/g')"
+              if [ "$safe_name" != "$name" ]; then
+                echo "::warning::feed 名含不安全字符，已改写为「${safe_name}」（原名：${name}）"
+                name="$safe_name"
+              fi
+    
+              if [ -z "$name" ] || [ -z "$url" ]; then
+                echo "::warning::feed 行无法解析（需要 <name> <url>），已跳过: $raw"
+                continue
+              fi
+    
+              # 同名源：先删旧行，避免 feeds.conf 里出现两个同名 feed。
+              # sed 用 / 作分隔符（name 已不含 /）；grep -E 里只剩 . 是元字符，单独转义
+              name_re="$(re_escape "$name")"
+              if feed_exists "$name_re"; then
+                # 覆盖源码自带的 feed 影响面很大（例如把 packages 换成第三方源），必须显式告警
+                if [ -f "$DEFAULT" ] && grep -qE "^src-[a-z-]+[[:space:]]+${name_re}([[:space:]]|$)" "$DEFAULT"; then
+                  echo "::warning::正在覆盖源码自带 feed「${name}」——这会替换掉源码的默认源，可能导致编译失败: ${url}"
+                else
+                  echo "[feeds] 已有同名源，按新地址覆盖: ${name}"
+                fi
+                ensure_conf
+                sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" "$CONF"
+              fi
+    
+              add_feed "$name" "$url" "表单 extra_feeds"
+            done <<< "$(norm_feeds)"
+          fi
+    
+          # ---------- 汇总（日志里一眼能看到最终用了哪几个源）----------
+          echo "--- feed 源汇总 ---"
           echo "生效:${ADDED:- （无）}"
           echo "失败:${FAILED:- （无）}"
-          echo "--- 当前 feeds.conf ---"
-          cat feeds.conf
-
-      # ---------- 4 生成变量（缓存 key / 产物名）----------
+          # 注意：若一个 feed 都没追加，feeds.conf 可能根本不存在，
+          # 这时绝不能直接 cat（set -e 会让整条构建挂掉）——
+          # 例如 25.12 分支源码自带全部预置 feed，就是这种「全是空操作」的情况。
+          echo "--- 当前 feed 配置 ---"
+          if [ -f "$CONF" ]; then
+            cat "$CONF"
+          else
+            echo "(未生成 ${CONF}，scripts/feeds 将直接读 ${DEFAULT})"
+            grep -E '^[[:space:]]*src-' "$DEFAULT" 2>/dev/null || echo "(无)"
+          fi
       - name: Generate Variables(生成变量)
         id: vars
         env:

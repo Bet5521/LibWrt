@@ -154,10 +154,11 @@ function updateConfigHint() {
 /* ---------------- 渲染：功能组件 ---------------- */
 
 const SRC_BADGE = {
-  luci:     { cls: "ok",    txt: "默认 feed" },
-  packages: { cls: "ok",    txt: "默认 feed" },
-  nss:      { cls: "nss",   txt: "NSS 源" },
-  third:    { cls: "third", txt: "需第三方源" }
+  luci:     { cls: "ok",     txt: "默认 feed" },
+  packages: { cls: "ok",     txt: "默认 feed" },
+  nss:      { cls: "nss",    txt: "NSS 源" },
+  preset:   { cls: "preset", txt: "预置 feed" },
+  third:    { cls: "third",  txt: "需第三方源" }
 };
 
 function renderCatalog() {
@@ -633,7 +634,11 @@ async function runPkgCheck() {
     `<span class="spin"></span> 正在对照 <code>${esc(line.luciRepo)}@${esc(line.luciRef)}</code> 与 ` +
     `<code>${esc(line.packagesRepo)}@${esc(line.packagesRef)}</code> 校验 ${pkgs.length} 个包…`);
 
-  const { result, partial, errors, rateLimited } = await checkPackages(pkgs, line);
+  const [presetState, res] = await Promise.all([
+    checkPresetFeeds().catch(() => null),
+    checkPackages(pkgs, line)
+  ]);
+  const { result, partial, errors, rateLimited } = res;
 
   // 清理旧标记
   document.querySelectorAll(".pkg").forEach(t => {
@@ -641,11 +646,12 @@ async function runPkgCheck() {
     const c = t.querySelector(".pk-check"); if (c) c.innerHTML = "";
   });
 
-  const miss = [], ok = [], unknown = [];
+  const miss = [], ok = [], unknown = [], third = [];
   for (const p of pkgs) {
     const r = result[p];
-    if (r.status === "ok") ok.push(p);
+    if (r.status === "ok" || r.status === "preset") ok.push(p);
     else if (r.status === "miss") miss.push(p);
+    else if (r.status === "third") third.push(p);
     else unknown.push(p);
   }
 
@@ -654,20 +660,29 @@ async function runPkgCheck() {
     if (!result[p]) return;
     const c = t.querySelector(".pk-check");
     if (result[p].status === "ok") { if (c) c.innerHTML = `<span class="chip-mini ok">✓</span>`; }
+    else if (result[p].status === "preset") { if (c) c.innerHTML = `<span class="chip-mini preset">预置</span>`; }
+    else if (result[p].status === "third") { if (c) c.innerHTML = `<span class="chip-mini third">需加源</span>`; }
     else if (result[p].status === "miss") {
       t.classList.add("verified-miss");
       if (c) c.innerHTML = `<span class="chip-mini miss">未见</span>`;
     }
   });
 
+  const presetCount = pkgs.filter(p => result[p].status === "preset").length;
   let html = `校验完成：<b class="ok">${ok.length}</b> 个确认存在`;
+  if (presetCount) html += `（其中 <b>${presetCount}</b> 个来自仓库预置 feed，编译时会自动补上）`;
   if (unknown.length) html += `，<b>${unknown.length}</b> 个无法判定`;
+  if (third.length) html += `，<b>${third.length}</b> 个需第三方源`;
   if (miss.length) html += `，<b>${miss.length}</b> 个在默认 feed 里没找到`;
   html += `。<br>`;
 
+  if (third.length) {
+    html += `<span style="opacity:.9">需第三方源：<code>${esc(third.join(", "))}</code></span><br>` +
+      `这些包在默认源里本来就没有，要在第 4 步添加对应 feed 才会编进去。<br>`;
+  }
   if (miss.length) {
     html += `<span style="opacity:.9">未找到：<code>${esc(miss.join(", "))}</code></span><br>` +
-      `这些包多半来自第三方源。要么在第 4 步添加对应 feed，要么删掉它们（否则编译时只是警告、不会中断）。<br>`;
+      `要么在第 4 步添加对应 feed，要么删掉它们（否则编译时只是警告、不会中断）。<br>`;
   }
   if (unknown.length && partial) {
     if (rateLimited) {
@@ -772,16 +787,52 @@ function bind() {
 /* ---------------- 默认 feeds 加载 ---------------- */
 
 let feedsLoading = false;
+function renderPresetFeeds(presetState) {
+  const box = $("feeds-preset");
+  if (!box) return;
+  box.innerHTML = "";
+  const st = presetState || {};
+
+  PRESET_FEEDS.forEach(f => {
+    const s = st[f.name] || {};
+    const seen = f.dirs.filter(d => s.dirs && s.dirs[d] === true);
+    const badge = !s.dirs ? `<span class="chip-mini gray">未确认</span>`
+      : s.ok ? `<span class="chip-mini ok">已确认</span>`
+      : `<span class="chip-mini miss">读取失败</span>`;
+    const d = document.createElement("div");
+    d.className = "feed-item" + (s.dirs && !s.ok ? " warn" : " good");
+    d.innerHTML =
+      `<div class="fi-top"><span class="fi-name">${esc(f.name)}</span>` +
+      `<span class="chip-mini preset">预置</span>` + badge +
+      (f.branch ? `<span class="chip-mini gray">${esc(f.branch)}</span>` : "") +
+      `</div>` +
+      `<div class="fi-url">${esc(f.url)}</div>` +
+      `<div class="fi-note">${esc(f.desc)}</div>` +
+      `<div class="fi-note">包目录：` +
+      f.dirs.map(x => `<code>${esc(x)}</code>`).join(" ") +
+      (seen.length ? ` —— 已确认 ${seen.length}/${f.dirs.length} 个` : "") +
+      `</div>` +
+      (f.why ? `<div class="fi-note">${esc(f.why)}</div>` : "");
+    box.appendChild(d);
+  });
+}
+
 async function loadDefaultFeeds() {
   if (feedsLoading) return;
   feedsLoading = true;
   $("feeds-note").innerHTML = `<span class="spin"></span> 正在读取 ${esc(LINES[state.line].feedsRepo)} 的 feeds 配置…`;
   $("feeds-default").innerHTML = "";
+  $("feeds-preset").innerHTML = `<div class="feed-item"><span class="fi-url">正在确认预置 feed 的包目录…</span></div>`;
   try {
-    const info = await fetchDefaultFeeds(LINES[state.line]);
+    const [info, preset] = await Promise.all([
+      fetchDefaultFeeds(LINES[state.line]),
+      checkPresetFeeds().catch(() => null)
+    ]);
     renderDefaultFeeds(info);
+    renderPresetFeeds(preset);
   } catch (e) {
     renderDefaultFeeds(null);
+    renderPresetFeeds(null);
   } finally {
     feedsLoading = false;
   }

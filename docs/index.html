@@ -164,6 +164,20 @@
 
       <div class="subcard">
         <div class="subcard-head">
+          <h3>本仓库预置 feed</h3>
+          <span class="chip-mini preset">自动</span>
+        </div>
+        <p class="subcard-note">
+          写在本仓库 <code>feeds.conf.default</code> 的 <code>repo-extra-feeds</code> 区里，
+          编译前按 feed 名合并：<b>源码缺的补上，源码有的保持源码版本不动</b>。
+          所以它在两条编译线上都会生效（哪怕 24.10 实际 clone 的源码里根本没有这些源），
+          不需要在这里重复填写。
+        </p>
+        <div class="feed-list" id="feeds-preset"></div>
+      </div>
+
+      <div class="subcard">
+        <div class="subcard-head">
           <h3>自定义 feed 源</h3>
           <span class="count" id="cnt-feed"></span>
         </div>

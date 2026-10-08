@@ -11,6 +11,7 @@
      luci     → 来自 luci feed（LuCI 应用/主题/协议）
      packages → 来自 packages feed（命令行工具、内核模块等）
      nss      → 来自 qosmio NSS 专用源
+     preset   → 来自本仓库预置 feed（见下方 PRESET_FEEDS），两条编译线都会自动带上
      third    → 默认源通常没有，需要第 4 步加第三方 feed
 
    lines 字段（可选）：限定只在某些编译线存在，例如 ["25.12-nss"]
@@ -109,7 +110,9 @@ const CATALOG = [
       { pkg: "luci-app-frpc",        name: "FRP 客户端",    icon: "🚇", desc: "内网穿透客户端", src: "third" },
       { pkg: "luci-app-frps",        name: "FRP 服务端",    icon: "🚇", desc: "内网穿透服务端", src: "third" },
       { pkg: "luci-app-tinyproxy",   name: "Tinyproxy",    icon: "🕸️", desc: "轻量 HTTP 代理", src: "luci" },
-      { pkg: "luci-app-udpxy",       name: "udpxy",        icon: "📺", desc: "IPTV 组播转 HTTP", src: "packages" }
+      { pkg: "luci-app-udpxy",       name: "udpxy",        icon: "📺", desc: "IPTV 组播转 HTTP", src: "packages" },
+      { pkg: "luci-app-lucky",       name: "Lucky",        icon: "🍀", desc: "DDNS/端口转发/反代/ACME", src: "preset", note: "仓库预置 feed；标准/全功能/NoWiFi 三档已内建" },
+      { pkg: "lucky",                name: "Lucky 后端",   icon: "🍀", desc: "Lucky 二进制本体（前端自动带上）", src: "preset", note: "跟随 luci-app-lucky 自动安装" }
     ]
   },
   {
@@ -232,8 +235,7 @@ const CATALOG = [
     items: [
       { pkg: "luci-app-dockerman", name: "Docker (Dockerman)", icon: "🐳", desc: "容器图形管理", src: "luci" },
       { pkg: "docker",             name: "Docker CE",           icon: "🐳", desc: "容器引擎本体", src: "packages" },
-      { pkg: "luci-app-store",     name: "iStore",              icon: "🏪", desc: "应用商店（需第三方源）", src: "third" },
-      { pkg: "luci-app-lucky",     name: "Lucky",               icon: "🍀", desc: "DDNS/端口转发/反代工具", src: "third" }
+      { pkg: "luci-app-store",     name: "iStore",              icon: "🏪", desc: "应用商店（需第三方源）", src: "third" }
     ]
   },
   {
@@ -255,6 +257,36 @@ const CATALOG = [
 
 /* 展开成扁平数组，方便查找 */
 const ALL_PKGS = CATALOG.flatMap(c => c.items.map(i => ({ ...i, cat: c.cat })));
+
+/* ---------------- 仓库预置 feed ----------------
+   本仓库 feeds.conf.default 里 `# >>> repo-extra-feeds >>>` 与
+   `# <<< repo-extra-feeds <<<` 之间的 feed。云编译时（Build-OpenWrt.yml 的
+   Apply Feeds 步骤）按 feed 名合并到**任意**编译线：源码里没有同名 feed 才追加，
+   已有则保持源码那一份不动。所以下面的源在 24.10 / 25.12 两条线上都会生效，
+   即便 24.10 实际 clone 的 qosmio/openwrt-ipq 里根本没有这些源。
+
+   dirs 是 feed 仓库里的包目录名；页面会用它们去 repo 里逐个确认存在性，
+   所以这里不需要"背"结论，写了也只是给个提示。 */
+const PRESET_FEEDS = [
+  {
+    name: "lucky",
+    url: "https://github.com/gdy666/luci-app-lucky.git",
+    branch: "",
+    repo: "gdy666/luci-app-lucky",
+    ref: "main",
+    dirs: ["luci-app-lucky", "lucky"],
+    desc: "DDNS / 端口转发 / 反向代理 / ACME 证书自动化",
+    why: "纯预编译二进制 + 架构无关的 LuCI 前端，不含内核模块，跨内核/跨版本都安全"
+  }
+];
+
+/* 包名 → 它属于哪个预置 feed */
+const PRESET_PKG_FEED = {};
+PRESET_FEEDS.forEach(f => f.dirs.forEach(d => { PRESET_PKG_FEED[d] = f; }));
+
+/* 包名 → 目录里标称的来源（用于区分「默认源没有」和「需第三方源」） */
+const SRC_OF = {};
+ALL_PKGS.forEach(i => { SRC_OF[i.pkg] = i.src; });
 
 /* ---------------- 编译线建议分支（feed 校验用） ---------------- */
 

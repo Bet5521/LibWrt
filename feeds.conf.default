@@ -5,3 +5,21 @@ src-git luci https://github.com/immortalwrt/luci.git;openwrt-25.12
 src-git routing https://github.com/openwrt/routing.git;openwrt-25.12
 src-git telephony https://github.com/openwrt/telephony.git;openwrt-25.12
 src-git video https://github.com/openwrt/video.git;openwrt-25.12
+
+# >>> repo-extra-feeds >>>   以下 feed 由本仓库追加，云编译时会合并到任意分支
+#
+# 合并规则（见 .github/workflows/Build-OpenWrt.yml 的 Apply Feeds 步骤）：
+#   只补不覆盖 —— 源码里没有同名 feed 时才追加，已有则保持源码那一份不动。
+#   所以这里只能放「与内核版本、OpenWrt 版本都无关」的源。
+#
+# ⚠️ 不要把上面那些 packages / luci / video 之类搬到这里：
+#   它们在本文件里写的是 openwrt-25.12，而 24.10-nss 分支实际 clone 的
+#   qosmio/openwrt-ipq 自带的是 openwrt-24.10 那一套（且没有 video）。
+#   一旦按名合并，就会把 25.12 系的 feed 误注入 24.10 构建。
+#
+# lucky：DDNS / 端口转发 / 反向代理 / ACME（作者 gdy666）
+#   纯预编译二进制 + 架构无关的 LuCI 前端，不含任何内核模块，
+#   因此跨内核（6.6 / 6.12）与跨 OpenWrt 版本都安全。
+src-git lucky https://github.com/gdy666/luci-app-lucky.git
+
+# <<< repo-extra-feeds <<<

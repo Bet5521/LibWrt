@@ -406,7 +406,28 @@ async function buildPkgIndex(line) {
   return idx;
 }
 
-async function checkPackages(pkgs, line) {
+/* ---------------- 仓库预置 feed 的存在性（运行时确认，不靠硬编码） ---------------- */
+
+async function checkPresetFeeds() {
+  const out = {};
+  for (const f of PRESET_FEEDS) {
+    const dirs = {}, missing = [], rateLimited = false;
+    for (const d of f.dirs) {
+      const r = await GH.call(`/repos/${f.repo}/contents/${encodeURIComponent(d)}?ref=${encodeURIComponent(f.ref)}`);
+      if (r.ok) { dirs[d] = true; continue; }
+      dirs[d] = false;
+      if (r.status === 403 && r.rateLeft === "0") rateLimited = true;
+      else if (r.status !== 404) missing.push(`${d} (HTTP ${r.status})`);
+    }
+    out[f.name] = {
+      feed: f, dirs, rateLimited, errors: missing,
+      ok: f.dirs.some(d => dirs[d])
+    };
+  }
+  return out;
+}
+
+async function checkPackages(pkgs, line, presetState) {
   const idx = await buildPkgIndex(line);
   const result = {};
   for (const pkg of pkgs) {
@@ -417,8 +438,24 @@ async function checkPackages(pkgs, line) {
     else if (/^ath11k-firmware/.test(pkg)) where = "packages feed · 无线固件";
     else if (/^ipq-wifi-/.test(pkg)) where = "无线校准文件（本机型已内建）";
 
-    if (where) result[pkg] = { status: "ok", where };
-    else if (idx.partial) result[pkg] = { status: "unknown", where: "feed 索引不完整，无法判定" };
+    if (where) { result[pkg] = { status: "ok", where }; continue; }
+
+    // 仓库预置 feed：默认源里当然找不到，但编译前会自动补上
+    const pf = PRESET_PKG_FEED[pkg];
+    if (pf) {
+      const st = presetState && presetState[pf.name];
+      if (st && st.dirs[pkg] === true) {
+        result[pkg] = { status: "preset", where: `仓库预置 feed · ${pf.repo}（已确认存在）` };
+      } else if (st && st.dirs[pkg] === false && !st.rateLimited) {
+        result[pkg] = { status: "miss", where: `仓库预置 feed ${pf.repo} 里没找到这个包目录` };
+      } else {
+        result[pkg] = { status: "preset", where: `仓库预置 feed · ${pf.repo}（未能实时确认）` };
+      }
+      continue;
+    }
+
+    if (idx.partial) result[pkg] = { status: "unknown", where: "feed 索引不完整，无法判定" };
+    else if (SRC_OF[pkg] === "third") result[pkg] = { status: "third", where: "默认源里没有，需在第 4 步加对应第三方 feed" };
     else result[pkg] = { status: "miss", where: "" };
   }
   return { result, partial: idx.partial, errors: idx.errors, rateLimited: idx.rateLimited };

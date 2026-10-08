@@ -9,10 +9,10 @@
 
 | 档位 | 配置文件 | 编入包数 | 定位 | 什么时候选 |
 | :--- | :--- | :-: | :--- | :--- |
-| **标准** | `IPQ60XX.config` | 71 | 精简满血 NSS，带 SQM/UPnP/WoL | 一次性配好就不太动，要限速与网络唤醒 |
-| **极简** | `IPQ60XX-minimal.config` | 49 | 基准档减掉一切便利组件 | 只要路由本职功能，最省 flash / 内存 |
-| **全功能** | `IPQ60XX-full.config` | 120 | 基准档 + 常用应用 / 工具 / USB | 要当家庭网关 + 轻 NAS，什么都想有 |
-| **无无线** | `NoWiFi.config` | 65 | 不编 ath11k 与 wpad | 关掉无线当纯有线路由 / 旁路由 |
+| **标准** | `IPQ60XX.config` | 73 | 精简满血 NSS，带 SQM/UPnP/WoL/Lucky | 一次性配好就不太动，要限速与网络唤醒 |
+| **极简** | `IPQ60XX-minimal.config` | 52 | 基准档减掉一切便利组件（含 Lucky） | 只要路由本职功能，最省 flash / 内存 |
+| **全功能** | `IPQ60XX-full.config` | 118 | 基准档 + 常用应用 / 工具 / USB | 要当家庭网关 + 轻 NAS，什么都想有 |
+| **无无线** | `NoWiFi.config` | 68 | 不编 ath11k 与 wpad | 关掉无线当纯有线路由 / 旁路由 |
 
 > 三个派生档位**不是手工维护的**——由 `_gen_profiles.py` 从基准档 `IPQ60XX.config` 自动生成。
 > 改基准档后重新跑一次生成器，四个档位就不会再各自漂移。
@@ -59,9 +59,9 @@
   `ath11k-firmware-ipq6018` 里（**没有** `ath11k-firmware-qcn5052` 这种包名）。
 - `ipq-wifi-jdcloud_re-ss-01`（board-2.bin 覆盖件）由设备定义里的 `DEVICE_PACKAGES` 自动带出，**不要在 config 里手写**。
 
-### 维度 2：极简档移除的 22 项
+### 维度 2：极简档移除的 25 项
 
-在基准档基础上注释掉以下包（共 22 个：20 个功能包 + 2 个配套翻译包）：
+在基准档基础上注释掉以下包（共 25 个：23 个功能包 + 2 个配套翻译包）：
 
 | 分组 | 移除的包 |
 | :--- | :--- |
@@ -70,6 +70,7 @@
 | 隧道 | `kmod-gre`、`kmod-ipip`、`kmod-tunnel4`、`kmod-vxlan` |
 | 命令行工具 | `htop`、`ttyd`、`coreutils`、`coreutils-sort`、`coreutils-xxd`、`openssh-client-utils`、`terminfo` |
 | 系统维护 | `watchdog`、`logrotate` |
+| 第三方应用 | `lucky`、`luci-app-lucky`、`luci-i18n-lucky-zh-cn`（Lucky 来自本仓库预置 feed，极简档不拉这个 feed） |
 | 配套翻译 | `luci-i18n-sqm-zh-cn`、`luci-i18n-upnp-zh-cn` |
 
 > ⚠️ 极简档 **去掉了 `luci-app-package-manager`**，也就是 LuCI 里的「软件包」页面。
@@ -90,6 +91,9 @@
 
 其中 `luci-app-filetransfer` 在基准档里被显式写成了 `=n`（在「明确不要」清单里），
 生成器会自动把那行处理掉，避免同一个键出现 `=n` 和 `=y` 两个值。
+
+> Lucky（`lucky` + `luci-app-lucky` + `luci-i18n-lucky-zh-cn`）已进基准档，全功能档直接继承，不在追加清单里。
+> 它来自本仓库 `feeds.conf.default` 的 `repo-extra-feeds` 预置区，编译时自动合并。
 
 ### 维度 4：基准档的「明确不要」清单
 

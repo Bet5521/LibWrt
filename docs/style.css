@@ -249,6 +249,7 @@ select {
 }
 .chip-mini.ok    { background: var(--ok-bg);   color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .chip-mini.nss   { background: color-mix(in srgb, var(--brand-2) 16%, transparent); color: var(--brand-2); border-color: color-mix(in srgb, var(--brand-2) 35%, transparent); }
+.chip-mini.preset{ background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 34%, transparent); }
 .chip-mini.third { background: var(--warn-bg); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
 .chip-mini.miss  { background: var(--err-bg);  color: var(--err);  border-color: color-mix(in srgb, var(--err) 32%, transparent); }
 .chip-mini.gray  { background: var(--code-bg); color: var(--text-3); border-color: var(--line); }

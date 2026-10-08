@@ -61,11 +61,13 @@
 
 不想在 Actions 表单里逐项手填，用网页版：**https://bet5521.github.io/LibWrt/**
 
-- **功能勾选**：111 个包按 14 个分类列出，每项标了来源（默认 feed / NSS 源 / 需第三方源），
+- **功能勾选**：112 个包按 14 个分类列出，每项标了来源（默认 feed / NSS 源 / **本仓库预置 feed** / 需第三方源），
   支持搜索、自定义包名、移除包名；还有「校验所选包」——按当前编译线去 feed 仓库逐个确认是否真实存在
 - **编译分支可切** `24.10-nss` / `25.12-nss`，页面显示该线的源码仓库、内核版本、默认 feeds 来源
 - **Feed 源管理**（本次新增的重点）：
   - 默认 feeds **直接从源码仓库的 `feeds.conf.default` 读取展示**（切分支会自动重新读取）
+  - **本仓库预置 feed** 单独一块：来自本仓库 `feeds.conf.default` 的 `repo-extra-feeds` 区，
+    两条编译线都会自动补上；页面会实时去上游仓库确认包目录是否存在，不靠硬编码结论
   - 添加自定义源后**立即自动校验**，逐条给出结论与建议：
     | 校验项 | 判定与建议 |
     |---|---|
@@ -109,10 +111,11 @@ docs/style.css                           # 页面样式（亮/暗主题）
 docs/catalog.js                          # 功能组件目录 + 编译线元数据
 docs/feedcheck.js                        # GitHub API 封装 + feed 源校验 + 包名存在性校验
 docs/app.js                              # 页面主逻辑（勾选 / 校验 / 触发编译）
-configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包，默认档）
+feeds.conf.default                       # 源码 feed 清单 + 本仓库追加的 repo-extra-feeds 区
+configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，73 包，默认档）
 configs/IPQ60XX-minimal.config           # 极简档位（52 包）
-configs/IPQ60XX-full.config              # 全功能档位（115 包）
-configs/NoWiFi.config                    # 无无线档位（65 包）
+configs/IPQ60XX-full.config              # 全功能档位（118 包）
+configs/NoWiFi.config                    # 无无线档位（68 包）
 configs/_gen_profiles.py                 # 由基准档自动派生三个档位（防止漂移）
 configs/README.md                        # 四档差异与包级对照（详细版）
 ci/diy.sh                                # 初始状态生成（LAN / 无线 / 主机名 / 密码 / cron）
@@ -176,7 +179,7 @@ Release（含固件资产）/ Tag / 全部运行记录 / Artifacts / Actions 缓
 | 无线 | `wifi_channel_2g` / `wifi_htmode_2g` | `6` / `HE20` |
 | 无线 | `wifi_channel_5g` / `wifi_htmode_5g` | `36` / `HE80` |
 | 组件 | `extra_packages` / `remove_packages` | 空（空格/逗号/换行分隔，可多行） |
-| Feed | `extra_feeds` | 空（每行一个 `<name> <url>[;branch]`，留空＝只用源码默认 feeds） |
+| Feed | `extra_feeds` | 空（每行一个 `<name> <url>[;branch]`；留空＝只用源码默认 feeds + 本仓库预置 feed） |
 
 `wifi_enabled = off` 时：无线不启用，但配置保留，之后可在 LuCI 里一键打开。
 
@@ -190,12 +193,12 @@ src-git small https://github.com/kenzok8/small-package.git;main
 https://github.com/foo/bar.git;openwrt-24.10        # 不写名字，从 URL 自动推导
 ```
 
-编译时的行为（`Build-OpenWrt.yml` 的「Apply Custom Feeds」步骤）：
+编译时的行为（`Build-OpenWrt.yml` 的「Apply Feeds」步骤，**先合并仓库预置 feed，再处理表单自定义源**）：
 
 | 情况 | 处理 |
 | --- | --- |
-| 未填 | 直接跳过，沿用源码自带 `feeds.conf.default` |
-| 正常 | 先把 `feeds.conf.default` 复制成 `feeds.conf`（**必须**，否则 `scripts/feeds` 只读 `.default`，追加的行等于没写），再逐条追加 |
+| 表单未填 | 跳过表单源；**仓库预置 feed（见下节）仍会照常合并** |
+| 正常 | 需要追加时先把 `feeds.conf.default` 复制成 `feeds.conf`（**必须**，否则 `scripts/feeds` 只读 `.default`，追加的行等于没写），再逐条追加 |
 | 某条源 `update` 失败 | **只告警 + 回滚那一行**，其余源与整条构建继续跑 |
 | 同名源写了两次 | 后者覆盖前者，`feeds.conf` 里只留一行 |
 | **覆盖源码自带 feed** | 允许，但**显式告警**（用第三方源替换 `packages` 之类风险很大） |
@@ -203,6 +206,39 @@ https://github.com/foo/bar.git;openwrt-24.10        # 不写名字，从 URL 自
 | 装包有失败项 | 告警并列出，不中断 |
 
 > 用网页版（第 4 步）添加自定义源，会在提交前就帮你把这些坑提前判掉。
+
+### 本仓库预置 feed（`repo-extra-feeds` 区）
+
+本仓库 `feeds.conf.default` 末尾有一段用哨兵注释划出来的区域：
+
+```
+# >>> repo-extra-feeds >>>   以下 feed 由本仓库追加，云编译时会合并到任意分支
+src-git lucky https://github.com/gdy666/luci-app-lucky.git
+# <<< repo-extra-feeds <<<
+```
+
+编译时由 `Build-OpenWrt.yml` 的「Apply Feeds」步骤读取，规则是**只补不覆盖**：
+
+| 情况 | 处理 |
+| --- | --- |
+| 源码里没有同名 feed | 追加、`update`、`install -a -p <name>`，失败则回滚那一行 |
+| 源码里已有同名 feed | **保持源码那一份不动**（连地址都不改） |
+| 一个都没追加 | 不生成 `feeds.conf`，`scripts/feeds` 直接读源码的 `feeds.conf.default` |
+
+**为什么非要有这一段**：两条编译线 clone 的源码根本不是同一个仓库 ——
+`25.12-nss` clone 本仓库（天然带 lucky），`24.10-nss` clone `qosmio/openwrt-ipq`（**没有** lucky）。
+只改 `feeds.conf.default` 的话，24.10 线永远不会生效。
+
+**⚠️ 这一段只能放「与内核版本、OpenWrt 版本都无关」的源。**
+别把上面那些 `packages` / `luci` / `video` 搬进来：本文件里它们写的是 `openwrt-25.12`，
+而 `qosmio/openwrt-ipq@24.10-nss` 自带的是 `openwrt-24.10` 那一套（并且**没有** `video`）。
+一旦按名合并就成了「把 25.12 系 feed 注入 24.10 构建」，这是实测确认过的坑。
+
+当前预置内容：
+
+| feed | 地址 | 提供 | 为什么安全 |
+| --- | --- | --- | --- |
+| `lucky` | `gdy666/luci-app-lucky` | `luci-app-lucky`（前端）+ `lucky`（后端二进制） | 后端是上游预编译二进制、前端是架构无关的 LuCI 包，**不含任何内核模块**，跨内核（6.6 / 6.12）与跨版本都安全 |
 
 
 ### 设置是怎么生效的
@@ -236,10 +272,13 @@ https://github.com/foo/bar.git;openwrt-24.10        # 不写名字，从 URL 自
 
 | 档位 | 配置文件 | 编入包数 | 与基准（标准）差异 | 定位 |
 | :--- | :--- | :-: | :--- | :--- |
-| **标准** | `IPQ60XX.config` | 70 | —（基准） | 精简满血 NSS，带 SQM/UPnP/WoL |
-| **极简** | `IPQ60XX-minimal.config` | 52 | **−18**（砍掉便利组件，含 2 个孤儿翻译） | 只要路由本职，最省 flash / 内存（**默认档**） |
-| **全功能** | `IPQ60XX-full.config` | 115 | **+45**（常用 LuCI 应用 + 工具 + USB 存储） | 家庭网关 + 轻 NAS，什么都想有 |
-| **无无线** | `NoWiFi.config` | 65 | **−5 无线包**（ath11k/wpad 改 `=n`，另加 12 条兜底 `=n`） | 关无线当纯有线路由 / 旁路由 |
+| **标准** | `IPQ60XX.config` | 73 | —（基准） | 精简满血 NSS，带 SQM/UPnP/WoL/**Lucky** |
+| **极简** | `IPQ60XX-minimal.config` | 52 | **−21**（砍掉便利组件，含 2 个孤儿翻译） | 只要路由本职，最省 flash / 内存 |
+| **全功能** | `IPQ60XX-full.config` | 118 | **+45**（常用 LuCI 应用 + 工具 + USB 存储） | 家庭网关 + 轻 NAS，什么都想有 |
+| **无无线** | `NoWiFi.config` | 68 | **−5 无线包**（ath11k/wpad 改 `=n`，另加 12 条兜底 `=n`） | 关无线当纯有线路由 / 旁路由 |
+
+> 三个派生档都含 **Lucky**（DDNS / 端口转发 / 反向代理 / ACME），极简档不带。
+> Lucky 来自本仓库预置 feed（见下文），两条编译线都会自动补上。
 
 > ⚠️ 三个派生档位**不是手工维护的**——由 `configs/_gen_profiles.py` 从基准档 `IPQ60XX.config` 自动生成，
 > 改基准档后重跑生成器即可，四档不再各自漂移。
@@ -367,6 +406,14 @@ https://github.com/foo/bar.git;openwrt-24.10        # 不写名字，从 URL 自
 | `luci-app-uhttpd` | — | — | ✓ | — |
 | `luci-app-vlmcsd` | — | — | ✓ | — |
 | `luci-app-watchcat` | — | — | ✓ | — |
+
+**第三方应用（Lucky，来自本仓库预置 feed）**（标准 / 全功能 / 无无线有；极简无）
+
+| 包名 | 标准 | 极简 | 全功能 | 无无线 |
+| :--- | :-: | :-: | :-: | :-: |
+| `lucky`（后端二进制） | ✓ | — | ✓ | ✓ |
+| `luci-app-lucky`（LuCI 前端） | ✓ | — | ✓ | ✓ |
+| `luci-i18n-lucky-zh-cn` | ✓ | — | ✓ | ✓ |
 
 **基础工具**
 

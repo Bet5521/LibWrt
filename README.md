@@ -61,7 +61,7 @@
 
 不想在 Actions 表单里逐项手填，用网页版：**https://bet5521.github.io/LibWrt/**
 
-- **功能勾选**：120+ 个包按 13 个分类列出，每项标了来源（默认 feed / NSS 源 / 需第三方源），
+- **功能勾选**：111 个包按 14 个分类列出，每项标了来源（默认 feed / NSS 源 / 需第三方源），
   支持搜索、自定义包名、移除包名；还有「校验所选包」——按当前编译线去 feed 仓库逐个确认是否真实存在
 - **编译分支可切** `24.10-nss` / `25.12-nss`，页面显示该线的源码仓库、内核版本、默认 feeds 来源
 - **Feed 源管理**（本次新增的重点）：
@@ -81,6 +81,9 @@
 
 仓库 **Settings → Pages → Build and deployment → Source** 选 **`GitHub Actions`** → 保存一次即可。
 之后改 `docs/` 下的文件并推送，会自动重新部署（见 `.github/workflows/Pages.yml`）。
+
+> 从别人仓库 fork 过来时，Pages 设置**不会**继承上游，必须在本仓库手动开一次；
+> 若 Actions 被禁用，还要在 Actions 页面点一次「I understand my workflows, go ahead and enable them」。
 
 ### 网页用什么 Token
 
@@ -106,7 +109,7 @@ docs/style.css                           # 页面样式（亮/暗主题）
 docs/catalog.js                          # 功能组件目录 + 编译线元数据
 docs/feedcheck.js                        # GitHub API 封装 + feed 源校验 + 包名存在性校验
 docs/app.js                              # 页面主逻辑（勾选 / 校验 / 触发编译）
-configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包）
+configs/IPQ60XX.config                   # 标准档位（精简满血 NSS，70 包，默认档）
 configs/IPQ60XX-minimal.config           # 极简档位（52 包）
 configs/IPQ60XX-full.config              # 全功能档位（115 包）
 configs/NoWiFi.config                    # 无无线档位（65 包）

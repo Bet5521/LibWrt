@@ -1,11 +1,18 @@
 # =============================================================
 #  GitHub Pages —— 发布 docs/ 里的「自定义编译」网页
 #
-#  首次使用前需要一次性开启：
-#    仓库 Settings → Pages → Build and deployment → Source 选
-#    「GitHub Actions」→ 保存。
-#    （本工作流里的 configure-pages 已带 enablement: true 尝试自动开启，
-#      但该接口需要仓库管理员权限；若自动开启失败，手动开一次即可。）
+#  ⚠️ 首次使用前必须手动开启一次（fork 仓库的 Pages 设置不会从上游继承）：
+#
+#    1) 仓库 Settings → Pages → Build and deployment → Source
+#       选「GitHub Actions」→ 保存
+#    2) 若仓库是 fork，Actions 页顶部可能还有个
+#       「I understand my workflows, go ahead and enable them」按钮，点掉它
+#    3) （备用）如果 24.10-nss 分支部署被拒，去
+#       Settings → Environments → github-pages → Deployment branches and tags
+#       加一条 Name pattern 为 * 的规则
+#
+#  没开 Pages 时本工作流会在「Setup Pages」/「Deploy」步骤失败，
+#  失败时下面的最后一步会把上面这两条一次性设置打印到 Job Summary，照着做即可。
 #
 #  之后只要改 docs/ 下的文件并推送，页面就会自动重新部署。
 #  访问地址：https://<用户名>.github.io/<仓库名>/
@@ -14,7 +21,7 @@ name: Pages 部署
 
 on:
   push:
-    branches: [24.10-nss, 25.12-nss]
+    branches: [25.12-nss, 24.10-nss]
     paths:
       - 'docs/**'
       - '.github/workflows/Pages.yml'
@@ -42,9 +49,6 @@ jobs:
 
       - name: Setup Pages(配置 Pages)
         uses: actions/configure-pages@v5
-        with:
-          # 尝试自动开启 Pages；失败不影响后续步骤，只需手动开启一次
-          enablement: true
 
       - name: Upload docs(上传网页目录)
         uses: actions/upload-pages-artifact@v3
@@ -54,3 +58,23 @@ jobs:
       - name: Deploy(部署)
         id: deploy
         uses: actions/deploy-pages@v4
+
+      # 失败时把「一次性设置」写进 Job Summary，避免只看到一句 404/403 无从下手
+      - name: Hint On Failure(失败时给出设置指引)
+        if: failure()
+        run: |
+          {
+            echo "## ❌ 部署失败：Pages 还没开启（或分支被环境规则挡住）"
+            echo
+            echo "这是**一次性设置**，做完再点一次 Re-run 即可："
+            echo
+            echo "1. **开启 Pages**：仓库 \`Settings\` → \`Pages\` →"
+            echo "   \`Build and deployment\` → \`Source\` 选 **GitHub Actions** → 保存"
+            echo "2. **fork 仓库还要启用 Actions**：Actions 页顶部若有"
+            echo "   「I understand my workflows, go ahead and enable them」按钮，点掉它"
+            echo "3. **分支部署被拒时**（常见于从非默认分支部署）：\`Settings\` → \`Environments\` →"
+            echo "   \`github-pages\` → \`Deployment branches and tags\` → 加一条"
+            echo "   Name pattern = \`*\` 的规则"
+            echo
+            echo "完成后地址形如：\`https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/\`"
+          } >> "$GITHUB_STEP_SUMMARY"

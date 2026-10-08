@@ -310,7 +310,16 @@ jobs:
             echo "$VERSION_INFO"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
-          KERNEL_VER="$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' target/linux/generic/kernel-* 2>/dev/null | head -n1 || true)"
+          # 内核版本：两种源码布局都要认，否则 tag 里会写成 unknown
+          #   旧布局：target/linux/generic/kernel-6.12（25.12 等）
+          #   新布局：include/kernel-6.6（24.10 起，只有 LINUX_VERSION-6.6 = .141）
+          KERNEL_VER="$(grep -oP 'LINUX_KERNEL_HASH-\K[0-9]+\.[0-9]+\.[0-9]+' \
+            target/linux/generic/kernel-* include/kernel-* 2>/dev/null | head -n1 || true)"
+          if [ -z "$KERNEL_VER" ]; then
+            # 二次回退：从 LINUX_VERSION-6.6 = .141 拼出 6.6.141
+            KERNEL_VER="$(awk '/^LINUX_VERSION-/ { split($1,a,"-"); v=$3; sub(/^\./,"",v); print a[2] "." v; exit }' \
+              include/kernel-* 2>/dev/null || true)"
+          fi
           echo "version_kernel=${KERNEL_VER:-unknown}" >> "$GITHUB_OUTPUT"
 
       # ---------- 2.5 补齐缺失的机型支持 ----------

@@ -1,22 +1,29 @@
-name: Setup Repo(一次性配置 About 与 Pages)
+name: Setup Repo(一次性配置 About + 启用并部署 Pages)
 
-# 这个工作流只该手动跑一两次：把仓库 About（描述 / 主页 / Topics）改成实际内容，
-# 并启用 GitHub Pages（fork 仓库不会继承上游的 Pages 设置，必须显式开一次）。
-# 之后网页部署由 Pages.yml 负责，本文件可以保留也可以删除。
+# 一次性工作流：把仓库 About（描述 / 主页 / Topics）改成实际内容，
+# 并启用 GitHub Pages（fork 仓库不会继承上游的 Pages 设置，必须显式开一次），
+# 然后直接把 docs/ 部署上线 —— 一次运行全部完成。
+# 之后网页部署由 Pages.yml 负责；本文件保留不影响任何日常流程，
+# 触发条件只有「手动 dispatch」和「本文件自身被修改」，不会反复空跑。
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/Setup-Repo.yml
 
 # GITHUB_TOKEN 默认拿不到这些权限，必须在这里显式声明：
 #   administration: write  → PATCH /repos（About）与 PUT /topics
-#   pages: write           → POST /pages（启用 Pages）
+#   pages: write           → POST /pages（启用 Pages）+ 部署
+#   id-token: write        → actions/deploy-pages 需要
 permissions:
   contents: read
   administration: write
   pages: write
+  id-token: write
 
 concurrency:
-  group: setup-repo
+  group: pages
   cancel-in-progress: false
 
 jobs:
@@ -84,11 +91,20 @@ jobs:
             exit 1
           fi
 
-      - name: Verify(复核)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "--- 仓库 About ---"
-          curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}" \
-            | jq '{description, homepage, has_pages, topics}'
+  deploy:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout(检出 docs/)
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs
+
+      - name: Deploy Pages
+        uses: actions/deploy-pages@v4

@@ -430,14 +430,30 @@ jobs:
                 | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')"
             fi
 
+            # name 会拼进 /tmp/<name>.log 的路径，也会进 sed/grep 表达式，
+            # 所以先滤掉不安全字符（name 里带 / 会直接写坏 sed 命令、写坏日志路径）
+            safe_name="$(printf '%s' "$name" | sed 's/[^A-Za-z0-9._-]/-/g')"
+            if [ "$safe_name" != "$name" ]; then
+              echo "::warning::feed 名含不安全字符，已改写为「${safe_name}」（原名：${name}）"
+              name="$safe_name"
+            fi
+
             if [ -z "$name" ] || [ -z "$url" ]; then
               echo "::warning::feed 行无法解析（需要 <name> <url>），已跳过: $raw"
               continue
             fi
 
-            # 同名源：先删旧行，避免 feeds.conf 里出现两个同名 feed
-            if grep -qE "^src-[a-z-]+[[:space:]]+${name}([[:space:]]|$)" feeds.conf; then
-              echo "[feeds] 已有同名源，按新地址覆盖: $name"
+            # 同名源：先删旧行，避免 feeds.conf 里出现两个同名 feed。
+            # sed 用 / 作分隔符（name 已不含 /）；grep -E 里只剩 . 是元字符，单独转义
+            name_re="$(printf '%s' "$name" | sed 's/\./\\./g')"
+            if grep -qE "^src-[a-z-]+[[:space:]]+${name_re}([[:space:]]|$)" feeds.conf; then
+              # 覆盖源码自带的 feed 影响面很大（例如把 packages 换成第三方源），必须显式告警
+              if [ -f feeds.conf.default ] && \
+                 grep -qE "^src-[a-z-]+[[:space:]]+${name_re}([[:space:]]|$)" feeds.conf.default; then
+                echo "::warning::正在覆盖源码自带 feed「${name}」——这会替换掉源码的默认源，可能导致编译失败: ${url}"
+              else
+                echo "[feeds] 已有同名源，按新地址覆盖: $name"
+              fi
               sed -i "/^src-[a-z-]*[[:space:]]\+${name}[[:space:]]/d" feeds.conf
             fi
 

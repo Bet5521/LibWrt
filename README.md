@@ -409,6 +409,48 @@ src-git lucky https://github.com/gdy666/luci-app-lucky.git
 
 > 更细的包级差异、命名规则踩坑、生成器用法见 [`configs/README.md`](configs/README.md)。
 
+## 已装设备一键安装 Lucky（install_lucky.sh）
+
+> 适用场景：固件已经刷好、但**没编译进 Lucky**（或想在裸 OpenWrt 上补齐）的路由器，跑一次脚本即可装好 Lucky + LuCI，无需重新编译固件。
+
+仓库根目录的 [`install_lucky.sh`](install_lucky.sh) 是一个**非交互、一次性**安装脚本：
+
+- 自动识别包管理器：**opkg（ipk）** 或 **apk**
+- 自动识别架构（aarch64 / armv7 / x86_64 / mips / riscv64 …）
+- 自动从 `gdy666/luci-app-lucky` 最新 release 拉取三个包：`lucky` + `luci-app-lucky` + `luci-i18n-lucky-zh-cn`
+- 安装后自动 `enable + start` 服务，并校验 LuCI 入口
+
+### 用法
+
+```sh
+# 把脚本传到路由器（scp 或用 LuCI 文件管理器），然后：
+sh install_lucky.sh
+```
+
+可选环境变量：
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `LUCKY_VER` | 指定 release 版本 | 自动取最新（失败回退 `2.19.5`） |
+| `LUCKY_ARCH` | 强制架构（如 `arm64` / `mips_softfloat`） | 自动探测 |
+| `LUCKY_FULL` | 设为 `1` 用自带 Web 面板的 wanji 离线版 | `0` |
+
+```sh
+LUCKY_VER=2.19.5 sh install_lucky.sh
+```
+
+### ipk / apk 行为差异（重要）
+
+`gdy666` 上游**只发 ipk、不发 apk**，因此两种系统行为不同：
+
+| 系统 | 行为 | 干净度 |
+|---|---|---|
+| **opkg（如本仓库 24.10-nss 固件）** | 直接 `opkg install` 三个 ipk | ✅ 完全正规，opkg 数据库追踪 |
+| **apk + 固件已内置 Lucky（如本仓库 25.12-nss 自定义构建）** | 检测到已安装，跳过下载，仅 `enable + start` | ✅ 最干净 |
+| **apk + 裸固件** | 用 `ar` 解 ipk 手动落盘（best-effort 兜底） | ⚠️ apk 数据库不追踪，系统升级可能被覆盖 |
+
+> 生产环境**强烈建议把 Lucky 直接编进固件**（即本仓库各档位的标准 / 全功能 / 无无线做法），比运行时安装更稳。本脚本是「已刷机后快速补齐」的便利工具。
+
 ## 改配置
 
 只改 `configs/IPQ60XX.config`（基准），然后重跑生成器：
